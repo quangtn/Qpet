@@ -1,0 +1,73 @@
+{
+  "name": "qpet",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A floating macOS companion for Codex and Claude Code activity",
+  "type": "module",
+  "main": "out/main/index.js",
+  "author": "Quang Nguyen <quangtn@gmail.com>",
+  "license": "MIT",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "npm run typecheck && electron-vite build",
+    "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "npm run build && playwright test",
+    "package:mac": "npm run build && electron-builder --mac dir --arm64",
+    "package:dmg": "npm run build && electron-builder --mac dmg --arm64",
+    "doctor": "bash scripts/doctor-macos.sh",
+    "install:mac": "bash scripts/install-macos.sh",
+    "uninstall:mac": "bash scripts/uninstall-macos.sh",
+    "smoke:package": "node scripts/smoke-package.mjs"
+  },
+  "dependencies": {
+    "jsonc-parser": "3.3.1",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.61.1",
+    "@types/node": "26.1.1",
+    "@types/react": "19.2.17",
+    "@types/react-dom": "19.2.3",
+    "@vitejs/plugin-react": "5.1.4",
+    "electron": "43.1.0",
+    "electron-builder": "26.15.3",
+    "electron-vite": "5.0.0",
+    "playwright": "1.61.1",
+    "react": "19.2.7",
+    "react-dom": "19.2.7",
+    "typescript": "7.0.2",
+    "vitest": "4.1.10"
+  },
+  "build": {
+    "appId": "com.quangngu.qpet",
+    "productName": "QPet",
+    "asar": true,
+    "afterPack": "scripts/after-pack.cjs",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "out/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "resources/qpet-hook.sh",
+        "to": "qpet-hook.sh"
+      }
+    ],
+    "mac": {
+      "icon": "assets/pet/glasses-pet-master.png",
+      "category": "public.app-category.developer-tools",
+      "target": [
+        "dir",
+        "dmg"
+      ],
+      "artifactName": "QPet-${version}-${arch}.${ext}",
+      "hardenedRuntime": false,
+      "gatekeeperAssess": false
+    }
+  }
+}

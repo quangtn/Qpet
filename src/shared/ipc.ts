@@ -1,0 +1,20 @@
+export const IPC = {
+  snapshotGet: 'qpet:snapshot:get',
+  snapshotChanged: 'qpet:snapshot:changed',
+  activityMarkRead: 'qpet:activity:mark-read',
+  activityDismiss: 'qpet:activity:dismiss',
+  sessionAction: 'qpet:session:action',
+  integrationsInstall: 'qpet:integrations:install',
+  integrationsUninstall: 'qpet:integrations:uninstall',
+  integrationsRefresh: 'qpet:integrations:refresh',
+  settingsUpdate: 'qpet:settings:update',
+  petDragBegin: 'qpet:pet:drag-begin',
+  petDragMove: 'qpet:pet:drag-move',
+  petDragEnd: 'qpet:pet:drag-end',
+  providerAppOpen: 'qpet:provider-app:open',
+  soundPlayTest: 'qpet:sound:play-test',
+  trayToggle: 'qpet:tray:toggle',
+  trayHide: 'qpet:tray:hide',
+  settingsShow: 'qpet:settings:show',
+  appQuit: 'qpet:app:quit'
+} as const
