@@ -21,6 +21,7 @@ import { IntegrationManager } from './integration-manager'
 import { registerIpcHandlers } from './ipc-handlers'
 import { NotificationManager, playMacNotificationSound } from './notification-manager'
 import { openProviderApp } from './provider-apps'
+import { RecoveryTray } from './recovery-tray'
 import { performSessionAction } from './session-actions'
 import { SettingsStore } from './settings-store'
 import { WindowManager } from './window-manager'
@@ -29,6 +30,7 @@ const MODULE_DIRECTORY = dirname(fileURLToPath(import.meta.url))
 const CLEANUP_INTERVAL_MS = 60 * 60 * 1_000
 
 app.setName('QPet')
+if (process.platform === 'darwin') app.setActivationPolicy('accessory')
 const configuredUserData = process.env.QPET_USER_DATA_DIR
 if (configuredUserData) app.setPath('userData', configuredUserData)
 
@@ -41,9 +43,10 @@ let claudePoller: ClaudePoller | undefined
 let claudePollerSyncQueue: Promise<void> = Promise.resolve()
 let cleanupTimer: NodeJS.Timeout | undefined
 let removeIpcHandlers: (() => void) | undefined
+let recoveryTray: RecoveryTray | undefined
 let isShuttingDown = false
 
-function unavailableStatus(listenerActive = false): IntegrationStatus {
+function unavailableStatus(listenerActive = false, listenerMessage?: string): IntegrationStatus {
   return {
     codex: {
       provider: 'codex',
@@ -63,7 +66,8 @@ function unavailableStatus(listenerActive = false): IntegrationStatus {
       health: 'unavailable',
       message: 'Cursor has not been checked yet.'
     },
-    listenerActive
+    listenerActive,
+    ...(listenerActive || !listenerMessage ? {} : { listenerMessage })
   }
 }
 
@@ -78,6 +82,7 @@ async function bootstrap(): Promise<void> {
   let integrationManager: IntegrationManager | undefined
   let integrationStatus = unavailableStatus()
   let binaries: Partial<Record<Provider, DiscoveredBinary>> = {}
+  let listenerError: string | undefined
 
   const publish = (): void => {
     const snapshot = getSnapshot()
@@ -104,7 +109,9 @@ async function bootstrap(): Promise<void> {
 
   try {
     await eventServer.start()
+    listenerError = undefined
   } catch (error) {
+    listenerError = error instanceof Error ? error.message : String(error)
     console.error('QPet event listener did not start.', error)
   }
 
@@ -117,14 +124,19 @@ async function bootstrap(): Promise<void> {
     appSupportDir: supportDir,
     helperSourcePath,
     discover: async () => binaries,
-    isListenerActive: () => eventServer?.isRunning ?? false
+    isListenerActive: () => eventServer?.isRunning ?? false,
+    listenerMessage: () =>
+      listenerError
+        ? `QPet’s local event listener failed to start: ${listenerError}`
+        : undefined
   })
   integrationStatus = await integrationManager.getStatus()
 
   const getSnapshot = (): AppSnapshot => ({
     activities: activityStore.getActivities(),
     integrations: integrationStatus,
-    settings: settingsStore.get()
+    settings: settingsStore.get(),
+    appVersion: app.getVersion()
   })
 
   const notificationManager = new NotificationManager(
@@ -155,12 +167,30 @@ async function bootstrap(): Promise<void> {
     app.setLoginItemSettings({ openAtLogin: enabled, openAsHidden: false })
   }
 
+  let syncRecoveryTray = (_petVisible: boolean): void => undefined
+
   const updateSettings = async (patch: Partial<AppSettings>): Promise<AppSettings> => {
     const settings = await settingsStore.update(patch)
     if (patch.launchAtLogin !== undefined) applyLoginItem(settings.launchAtLogin)
-    if (patch.petVisible !== undefined) windowManager?.setPetVisible(settings.petVisible)
+    if (patch.petVisible !== undefined) {
+      windowManager?.setPetVisible(settings.petVisible)
+      syncRecoveryTray(settings.petVisible)
+    }
     publish()
     return settings
+  }
+
+  if (process.platform === 'darwin') {
+    recoveryTray = new RecoveryTray(
+      join(MODULE_DIRECTORY, '../renderer/pets/qmini/app-icon.png'),
+      {
+        showPet: () => void updateSettings({ petVisible: true }),
+        showActivity: () => windowManager?.toggleTray(),
+        showSettings: () => windowManager?.showSettings()
+      }
+    )
+    syncRecoveryTray = (petVisible) => recoveryTray?.setPetVisible(petVisible)
+    syncRecoveryTray(settingsStore.get().petVisible)
   }
 
   const refreshBinariesAndStatus = async (): Promise<IntegrationStatus> => {
@@ -276,6 +306,8 @@ async function bootstrap(): Promise<void> {
     event.preventDefault()
     isShuttingDown = true
     if (cleanupTimer) clearInterval(cleanupTimer)
+    recoveryTray?.destroy()
+    recoveryTray = undefined
     removeIpcHandlers?.()
     Promise.allSettled([
       syncClaudePoller(),

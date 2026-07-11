@@ -7,6 +7,7 @@ import type {
   Provider,
   SessionAction
 } from '../shared/contracts'
+import { shellQuote } from '../shared/shell'
 import type { DiscoveredBinary } from './binary-discovery'
 
 export type BinaryReference = string | DiscoveredBinary
@@ -32,10 +33,7 @@ function validValue(value: string): boolean {
   return value.length > 0 && value.length <= 16_384 && !value.includes('\0')
 }
 
-export function shellQuote(value: string): string {
-  if (!validValue(value)) throw new Error('Unsafe or empty command value')
-  return `'${value.replaceAll("'", `'\\''`)}'`
-}
+export { shellQuote }
 
 function binaryPath(reference: BinaryReference | undefined): string | undefined {
   const path = typeof reference === 'string' ? reference : reference?.path

@@ -24,6 +24,7 @@ export class WindowManager {
   private settingsRoute: 'settings' | 'onboarding' = 'settings'
   private moveTimer: NodeJS.Timeout | null = null
   private petDragOffset: ScreenPoint | null = null
+  private petDisplayId: number | null = null
 
   constructor(private readonly options: WindowManagerOptions) {}
 
@@ -50,17 +51,23 @@ export class WindowManager {
       title: 'QPet',
       webPreferences: this.webPreferences()
     })
-    this.petWindow.setAlwaysOnTop(true, 'screen-saver')
-    this.petWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
+    this.pinAboveFullScreen(this.petWindow)
+    this.petDisplayId = screen.getDisplayMatching(this.petWindow.getBounds()).id
     this.petWindow.setWindowButtonVisibility(false)
     this.lockNavigation(this.petWindow)
     this.loadRoute(this.petWindow, 'pet')
     this.petWindow.once('ready-to-show', () => {
-      if (this.options.getSettings().petVisible) this.petWindow?.showInactive()
+      if (!this.petWindow) return
+      this.pinAboveFullScreen(this.petWindow)
+      if (this.options.getSettings().petVisible) {
+        this.petWindow.showInactive()
+        this.petWindow.moveTop()
+      }
     })
     this.petWindow.on('move', () => this.schedulePositionSave())
     this.petWindow.on('closed', () => {
       this.petWindow = null
+      this.petDisplayId = null
     })
 
     this.trayWindow = new BrowserWindow({
@@ -80,8 +87,7 @@ export class WindowManager {
       title: 'QPet Activity',
       webPreferences: this.webPreferences()
     })
-    this.trayWindow.setAlwaysOnTop(true, 'screen-saver')
-    this.trayWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
+    this.pinAboveFullScreen(this.trayWindow)
     this.lockNavigation(this.trayWindow)
     this.loadRoute(this.trayWindow, 'tray')
     this.trayWindow.on('blur', () => {
@@ -103,7 +109,9 @@ export class WindowManager {
     }
 
     this.positionTray()
+    this.pinAboveFullScreen(this.trayWindow)
     this.trayWindow.show()
+    this.trayWindow.moveTop()
     this.trayWindow.focus()
     this.options.onTrayOpened()
   }
@@ -114,8 +122,11 @@ export class WindowManager {
 
   beginPetDrag(point: ScreenPoint): void {
     if (!this.petWindow || this.petWindow.isDestroyed()) return
+    this.pinAboveFullScreen(this.petWindow)
+    this.petWindow.moveTop()
     const [x, y] = this.petWindow.getPosition()
     this.petDragOffset = { x: point.x - x, y: point.y - y }
+    this.petDisplayId = screen.getDisplayNearestPoint(point).id
   }
 
   movePetDrag(point: ScreenPoint): void {
@@ -124,7 +135,15 @@ export class WindowManager {
       point.x - this.petDragOffset.x,
       point.y - this.petDragOffset.y
     )
+    const targetDisplayId = screen.getDisplayNearestPoint(point).id
+    const changedDisplay = targetDisplayId !== this.petDisplayId
+    if (changedDisplay) this.pinAboveFullScreen(this.petWindow)
     this.petWindow.setPosition(position.x, position.y, false)
+    this.petWindow.moveTop()
+    if (changedDisplay) {
+      this.petDisplayId = targetDisplayId
+      this.pinAboveFullScreen(this.petWindow)
+    }
   }
 
   endPetDrag(): void {
@@ -171,7 +190,11 @@ export class WindowManager {
 
   setPetVisible(visible: boolean): void {
     if (!this.petWindow) return
-    if (visible) this.petWindow.showInactive()
+    if (visible) {
+      this.pinAboveFullScreen(this.petWindow)
+      this.petWindow.showInactive()
+      this.petWindow.moveTop()
+    }
     else {
       this.petWindow.hide()
       this.trayWindow?.hide()
@@ -227,6 +250,15 @@ export class WindowManager {
   private lockNavigation(window: BrowserWindow): void {
     window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
     window.webContents.on('will-navigate', (event) => event.preventDefault())
+  }
+
+  private pinAboveFullScreen(window: BrowserWindow): void {
+    if (window.isDestroyed()) return
+    window.setAlwaysOnTop(true, 'screen-saver')
+    window.setVisibleOnAllWorkspaces(true, {
+      visibleOnFullScreen: true,
+      skipTransformProcessType: true
+    })
   }
 
   private initialPetPosition(): { x: number; y: number } {

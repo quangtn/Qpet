@@ -5,7 +5,7 @@ QPet is a small, floating macOS companion for local Codex, Claude Code, and Curs
 QPet is open source under the [MIT License](LICENSE). It is a personal, local-first app: no account, cloud service, or telemetry is required.
 
 <p align="center">
-  <img src="docs/screenshots/qpet-working.png" alt="QPet showing active Codex and Claude sessions" width="488">
+  <img src="docs/screenshots/qpet-working.png" alt="QPet showing active Codex, Claude, and Cursor sessions" width="452">
 </p>
 
 ## V0 behavior
@@ -13,8 +13,10 @@ QPet is open source under the [MIT License](LICENSE). It is a personal, local-fi
 - Watches new Codex, Claude Code, and Cursor sessions through user-level lifecycle hooks.
 - Reconciles live Claude sessions with `claude agents --json`.
 - Prioritizes pet activity as: **needs input → blocked → working → ready → idle**.
+- Lets users choose between the original Classic pixel pet and the smooth canonical Qmini theme in Settings.
 - Sends macOS notifications only when a session needs input or is blocked.
 - Provides safe project, attach, resume, and copy-command actions without resuming a live session twice.
+- Runs as a macOS accessory app so the pet stays above normal and fullscreen Spaces; use the pet or its tray for Settings and Quit because QPet does not appear in the Dock or Command–Tab.
 - Runs locally. It does not monitor Claude Desktop/web chats or embed a provider agent SDK.
 - Cursor reports working and completion lifecycle states, but does not expose a reliable approval-request hook for QPet's Needs input state.
 
@@ -68,9 +70,9 @@ prompt:
 
 > Read `README.md` and `AGENTS.md`. Run `npm run doctor`, then verify the
 > prerequisites. Run `npm ci`, `npm run typecheck`, `npm test`, and
-> `npm run install:mac`. Do not edit `~/.codex` or `~/.claude` directly; leave
-> integration installation for QPet's interactive Settings screen. Report any
-> failed command with its exact output.
+> `npm run install:mac`. Do not edit `~/.codex`, `~/.claude`, or `~/.cursor`
+> directly; leave integration installation for QPet's interactive Settings
+> screen. Report any failed command with its exact output.
 
 ## Development
 
@@ -91,6 +93,14 @@ The packaged app is written to `release/mac-arm64/QPet.app`. The current
 release target is Apple Silicon macOS. Intel Mac and Windows builds are not yet
 supported.
 
+## Roadmap
+
+The next platform milestone is a Windows 11 x64 beta. It will keep the existing
+privacy model while adding Windows-native hook forwarding, provider discovery,
+Windows Terminal actions, notifications, launch-at-login, always-on-top window
+behavior, and an installer. Native Windows support comes first; WSL bridging
+and cross-virtual-desktop parity follow after the beta is stable.
+
 For a manually packaged copy, use `~/Applications/QPet.app` (or another
 writable app folder), open it, and complete the in-app integration setup. Run
 `npm run smoke:package` after packaging to exercise the actual bundle.
@@ -100,13 +110,38 @@ writable app folder), open it, and complete the in-app integration setup. Run
 Open QPet Settings and choose **Install integrations**. QPet will:
 
 1. Install a fail-open relay under `~/Library/Application Support/QPet/`.
-2. Merge its handlers into `~/.codex/hooks.json`, `~/.claude/settings.json`, and `~/.cursor/hooks.json`.
+2. Merge its handlers into the hook configs for **detected** provider CLIs
+   (`~/.codex/hooks.json`, `~/.claude/settings.json`, and/or `~/.cursor/hooks.json`).
 3. Create timestamped, permission-preserving sidecar backups of changed files.
 4. Leave `~/.codex/config.toml` untouched, including existing `notify` commands.
 
 Codex requires explicit hook trust. After installation, open `/hooks` in a new Codex session and approve the QPet hook definition. QPet never bypasses this trust check.
 
 Uninstalling integrations removes only handlers whose command points to QPet's installed relay. Hooks fail open within one second when QPet is not running.
+
+## Optional code signing
+
+QPet ships unsigned by default so anyone can build from source. Unsigned builds
+may require **Control-click → Open** on first launch, and macOS notification
+delivery can be less reliable.
+
+To sign and notarize your own Apple Silicon build with a Developer ID
+certificate:
+
+1. Export a Developer ID Application certificate as a `.p12` file.
+2. Set `CSC_LINK` (path or base64 of the `.p12`) and `CSC_KEY_PASSWORD`.
+3. For notarization, also set `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, and
+   `APPLE_TEAM_ID`.
+4. Enable hardened runtime for the signed build, then package:
+
+```bash
+# Example for a signed+notarized local release
+export CSC_IDENTITY_AUTO_DISCOVERY=true
+npm run package:dmg
+```
+
+`electron-builder` picks up those environment variables automatically. Keep
+personal certificates and app-specific passwords out of the repository.
 
 ## Troubleshooting
 
@@ -157,6 +192,10 @@ The robot artwork lives in `assets/pet/`; renderer styling and state animations
 live in `src/renderer/`. Provider hook parsing, privacy filtering, and session
 actions remain in the main process so visual customization cannot widen QPet's
 IPC surface.
+
+To swap the pet (or hand a brief to a designer), see
+[docs/DESIGNER.md](docs/DESIGNER.md) — required filenames, sizes, used vs unused
+assets, and a drop-in replace workflow.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for development and change guidelines,
 and [SECURITY.md](SECURITY.md) for responsible disclosure.

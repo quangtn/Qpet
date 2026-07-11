@@ -1,6 +1,7 @@
 export type Provider = 'codex' | 'claude' | 'cursor'
 
 export type PetState = 'running' | 'needs_input' | 'ready' | 'blocked'
+export type PetTheme = 'classic' | 'qmini'
 
 export type IntegrationHealth =
   | 'not_installed'
@@ -37,6 +38,8 @@ export interface IntegrationStatus {
   claude: IntegrationDetail
   cursor: IntegrationDetail
   listenerActive: boolean
+  /** Present when the loopback event listener failed to start or is down. */
+  listenerMessage?: string
 }
 
 export interface AppSettings {
@@ -44,6 +47,7 @@ export interface AppSettings {
   systemNotifications: boolean
   soundNotifications: boolean
   petVisible: boolean
+  petTheme: PetTheme
   petPosition?: { x: number; y: number }
 }
 
@@ -56,6 +60,7 @@ export interface AppSnapshot {
   activities: Activity[]
   integrations: IntegrationStatus
   settings: AppSettings
+  appVersion: string
 }
 
 export type SessionAction = 'open_project' | 'attach' | 'resume' | 'copy_command'

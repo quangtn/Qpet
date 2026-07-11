@@ -1,9 +1,10 @@
 import { randomBytes } from 'node:crypto'
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
-import { basename, dirname, join } from 'node:path'
+import { dirname, join } from 'node:path'
 
 import type { Activity, PetState, Provider } from '../shared/contracts'
+import { projectNameFor } from '../shared/activity'
 import {
   activityId,
   normalizeProviderEvent,
@@ -13,6 +14,7 @@ import {
 } from './provider-normalizers'
 
 export const CODEX_STALE_AFTER_MS = 24 * 60 * 60 * 1_000
+export const CURSOR_STALE_AFTER_MS = 2 * 60 * 60 * 1_000
 export const ACTIVITY_RETENTION_MS = 7 * 24 * 60 * 60 * 1_000
 export const PERMISSION_DEDUPE_WINDOW_MS = 5_000
 export const ACTIVITY_FILE_NAME = 'activities.json'
@@ -29,6 +31,7 @@ export interface ActivityStoreOptions {
   supportDir?: string
   now?: () => number
   codexStaleAfterMs?: number
+  cursorStaleAfterMs?: number
   retentionMs?: number
   dedupeWindowMs?: number
 }
@@ -59,6 +62,7 @@ export class ActivityStore {
 
   private readonly now: () => number
   private readonly codexStaleAfterMs: number
+  private readonly cursorStaleAfterMs: number
   private readonly retentionMs: number
   private readonly dedupeWindowMs: number
   private activities = new Map<string, Activity>()
@@ -77,6 +81,7 @@ export class ActivityStore {
     this.filePath = normalizedOptions.filePath ?? join(supportDir, ACTIVITY_FILE_NAME)
     this.now = normalizedOptions.now ?? Date.now
     this.codexStaleAfterMs = normalizedOptions.codexStaleAfterMs ?? CODEX_STALE_AFTER_MS
+    this.cursorStaleAfterMs = normalizedOptions.cursorStaleAfterMs ?? CURSOR_STALE_AFTER_MS
     this.retentionMs = normalizedOptions.retentionMs ?? ACTIVITY_RETENTION_MS
     this.dedupeWindowMs = normalizedOptions.dedupeWindowMs ?? PERMISSION_DEDUPE_WINDOW_MS
   }
@@ -262,7 +267,13 @@ export class ActivityStore {
       const removed: string[] = []
 
       for (const [id, activity] of nextActivities) {
-        if (shouldExpire(activity, now, this.codexStaleAfterMs, this.retentionMs)) {
+        if (shouldExpire(
+          activity,
+          now,
+          this.codexStaleAfterMs,
+          this.cursorStaleAfterMs,
+          this.retentionMs
+        )) {
           nextActivities.delete(id)
           removed.push(id)
         }
@@ -301,7 +312,13 @@ export class ActivityStore {
 
     const now = this.now()
     for (const [id, activity] of loaded) {
-      if (shouldExpire(activity, now, this.codexStaleAfterMs, this.retentionMs)) loaded.delete(id)
+      if (shouldExpire(
+        activity,
+        now,
+        this.codexStaleAfterMs,
+        this.cursorStaleAfterMs,
+        this.retentionMs
+      )) loaded.delete(id)
     }
     this.activities = loaded
   }
@@ -361,6 +378,7 @@ export function shouldExpire(
   activity: Activity,
   now: number,
   codexStaleAfterMs = CODEX_STALE_AFTER_MS,
+  cursorStaleAfterMs = CURSOR_STALE_AFTER_MS,
   retentionMs = ACTIVITY_RETENTION_MS
 ): boolean {
   const age = Math.max(0, now - activity.updatedAt)
@@ -369,6 +387,10 @@ export function shouldExpire(
     (activity.state === 'running' || activity.state === 'needs_input')
   ) {
     return age >= codexStaleAfterMs
+  }
+
+  if (activity.provider === 'cursor' && activity.state === 'running') {
+    return age >= cursorStaleAfterMs
   }
 
   if (activity.state === 'ready' || activity.state === 'blocked') {
@@ -550,11 +572,6 @@ function toPersistedActivity(activity: Activity): Activity {
   }
   if (activity.backgroundJobId) result.backgroundJobId = activity.backgroundJobId
   return result
-}
-
-function projectNameFor(cwd: string): string {
-  const name = basename(cwd.replace(/\/+$/, ''))
-  return name || cwd
 }
 
 function cleanStoredString(value: unknown, maximumLength: number): string | undefined {

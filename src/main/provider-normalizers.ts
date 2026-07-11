@@ -1,6 +1,11 @@
-import { basename } from 'node:path'
-
 import type { Activity, PetState, Provider } from '../shared/contracts'
+import { projectNameFor } from '../shared/activity'
+
+export {
+  ACTIVITY_PRIORITY,
+  compareActivities,
+  sortActivities
+} from '../shared/activity'
 
 const MAX_SESSION_ID_LENGTH = 256
 const MAX_PATH_LENGTH = 4096
@@ -30,29 +35,8 @@ export interface ClaudeAgentObservation {
   observedAt: number
 }
 
-export const ACTIVITY_PRIORITY: Readonly<Record<PetState, number>> = {
-  needs_input: 4,
-  blocked: 3,
-  running: 2,
-  ready: 1
-}
-
 export function activityId(provider: Provider, sessionId: string): string {
   return `${provider}:${sessionId}`
-}
-
-export function compareActivities(left: Activity, right: Activity): number {
-  const priorityDelta = ACTIVITY_PRIORITY[right.state] - ACTIVITY_PRIORITY[left.state]
-  if (priorityDelta !== 0) return priorityDelta
-
-  const timeDelta = right.updatedAt - left.updatedAt
-  if (timeDelta !== 0) return timeDelta
-
-  return left.id.localeCompare(right.id)
-}
-
-export function sortActivities(activities: readonly Activity[]): Activity[] {
-  return [...activities].sort(compareActivities)
 }
 
 export function normalizeProviderEvent(
@@ -89,9 +73,12 @@ export function normalizeCursorEvent(
       return null
     case 'beforesubmitprompt':
     case 'afteragentthought':
-    case 'afteragentresponse':
     case 'posttooluse':
       return makeEvent(identity, 'running', 'Cursor is working', now, false)
+    case 'afteragentresponse':
+      // Cursor can omit Stop for some completed turns. A completed agent
+      // response is itself sufficient evidence that the turn is ready.
+      return makeEvent(identity, 'ready', 'Cursor finished', now, true, undefined, false)
     case 'stop':
       return makeEvent(identity, 'ready', 'Cursor finished', now, true, undefined, false)
     case 'sessionend': {
@@ -421,11 +408,6 @@ function readWorkingDirectory(input: Record<string, unknown>): string | undefine
     }
   }
   return undefined
-}
-
-function projectNameFor(cwd: string): string {
-  const name = basename(cwd.replace(/\/+$/, ''))
-  return name || cwd
 }
 
 function canonicalEventName(value: string | undefined): string {

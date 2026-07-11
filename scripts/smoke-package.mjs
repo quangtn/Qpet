@@ -1,7 +1,8 @@
 import { _electron as electron } from 'playwright'
+import { execFileSync } from 'node:child_process'
 import { mkdtemp, mkdir, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 
 const executablePath =
   process.argv[2] ??
@@ -9,6 +10,16 @@ const executablePath =
 const userData = await mkdtemp(join(tmpdir(), 'qpet-package-smoke-'))
 const fakeHome = join(userData, 'home')
 await mkdir(fakeHome, { recursive: true })
+
+const infoPlist = join(dirname(dirname(executablePath)), 'Info.plist')
+const lsUiElement = execFileSync(
+  '/usr/libexec/PlistBuddy',
+  ['-c', 'Print :LSUIElement', infoPlist],
+  { encoding: 'utf8' }
+).trim()
+if (lsUiElement !== 'true') {
+  throw new Error(`Packaged QPet must set LSUIElement=true; received ${lsUiElement || 'empty'}`)
+}
 
 const retry = async (operation, timeoutMs = 10_000) => {
   const deadline = Date.now() + timeoutMs
@@ -98,7 +109,7 @@ try {
   }
 
   process.stdout.write(
-    `Packaged QPet smoke test passed (sprite width ${imageWidth}px, authenticated event received).\n`
+    `Packaged QPet smoke test passed (LSUIElement enabled, sprite width ${imageWidth}px, authenticated event received).\n`
   )
 } finally {
   await app.close()

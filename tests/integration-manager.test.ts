@@ -56,7 +56,7 @@ describe('IntegrationManager', () => {
   it('installs Cursor hooks idempotently and preserves unrelated handlers', async () => {
     const home = await mkdtemp(join(tmpdir(), 'qpet-cursor-home-'))
     temporaryDirectories.push(home)
-    const cursorDir = join(home, '.cursor')
+    const cursorDir = join(home, 'cursor-config')
     await mkdir(cursorDir, { recursive: true })
     const existing = { command: '/usr/local/bin/keep-cursor-stop', timeout: 5 }
     await writeFile(
@@ -68,6 +68,7 @@ describe('IntegrationManager', () => {
       homeDir: home,
       appSupportDir: join(home, 'Library', 'Application Support', 'QPet'),
       helperSourcePath: resolve('resources/qpet-hook.sh'),
+      cursorHooksPath: join(cursorDir, 'hooks.json'),
       isListenerActive: () => true,
       now: () => new Date('2026-07-10T12:34:56.789Z'),
       discover: async () => ({
@@ -340,5 +341,65 @@ describe('IntegrationManager', () => {
     expect(result.ok).toBe(false)
     expect(result.message).toContain('invalid JSON')
     expect(await readFile(settingsPath, 'utf8')).toBe(invalid)
+  })
+
+  it('installs hooks only for detected providers', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'qpet-provider-aware-'))
+    temporaryDirectories.push(home)
+    await mkdir(join(home, '.claude'), { recursive: true })
+    await writeFile(join(home, '.claude', 'settings.json'), '{ "hooks": ')
+
+    const manager = new IntegrationManager({
+      homeDir: home,
+      appSupportDir: join(home, 'Library', 'Application Support', 'QPet'),
+      helperSourcePath: resolve('resources/qpet-hook.sh'),
+      isListenerActive: () => true,
+      now: () => new Date('2026-07-10T12:34:56.789Z'),
+      discover: async () => ({ codex: binary('codex') })
+    })
+
+    const installed = await manager.install()
+    expect(installed.ok).toBe(true)
+    expect(installed.message).toContain('Codex')
+    expect(installed.message).not.toContain('Claude Code')
+    expect(installed.status.codex.health).toBe('awaiting_trust')
+    expect(qpetHandlerCount(JSON.parse(await readFile(manager.codexHooksPath, 'utf8')))).toBe(
+      CODEX_HOOK_EVENTS.length
+    )
+    await expect(access(manager.cursorHooksPath)).rejects.toMatchObject({ code: 'ENOENT' })
+    expect(await readFile(join(home, '.claude', 'settings.json'), 'utf8')).toBe('{ "hooks": ')
+  })
+
+  it('reports when no provider CLIs are available to install', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'qpet-no-providers-'))
+    temporaryDirectories.push(home)
+    const manager = new IntegrationManager({
+      homeDir: home,
+      appSupportDir: join(home, 'support'),
+      helperSourcePath: resolve('resources/qpet-hook.sh'),
+      isListenerActive: () => true,
+      discover: async () => ({})
+    })
+
+    const result = await manager.install()
+    expect(result.ok).toBe(false)
+    expect(result.message).toMatch(/No supported/)
+  })
+
+  it('exposes a listener message when the event listener is down', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'qpet-listener-down-'))
+    temporaryDirectories.push(home)
+    const manager = new IntegrationManager({
+      homeDir: home,
+      appSupportDir: join(home, 'support'),
+      helperSourcePath: resolve('resources/qpet-hook.sh'),
+      isListenerActive: () => false,
+      listenerMessage: () => 'QPet’s local event listener failed to start: EADDRINUSE',
+      discover: async () => ({ codex: binary('codex') })
+    })
+
+    const status = await manager.getStatus()
+    expect(status.listenerActive).toBe(false)
+    expect(status.listenerMessage).toContain('EADDRINUSE')
   })
 })

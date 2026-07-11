@@ -1,7 +1,7 @@
 # QPet contributor instructions
 
-QPet is a local-first, notification-only macOS companion for Codex and Claude
-Code. Keep it compact and privacy-preserving.
+QPet is a local-first, notification-only macOS companion for Codex, Claude
+Code, and Cursor. Keep it compact and privacy-preserving.
 
 ## Before changing code
 
@@ -18,7 +18,7 @@ Code. Keep it compact and privacy-preserving.
 - Never log or persist prompts, transcripts, commands, assistant responses, or
   raw hook payloads.
 - Hook configuration changes must remain atomic, idempotent, and limited to
-  QPet-owned entries. Preserve unrelated Codex and Claude settings.
+  QPet-owned entries. Preserve unrelated Codex, Claude, and Cursor settings.
 - Do not bypass Codex hook trust. The user approves QPet through `/hooks`.
 
 ## Verification
@@ -36,5 +36,6 @@ Run `npm run test:e2e` for renderer, Electron, or window-behavior changes. Run
 ## Local installation
 
 Use `npm run install:mac` for a source install. The script builds and installs
-the app only. It must not edit `~/.codex` or `~/.claude`; integration setup is
-performed interactively inside QPet so the user can review and trust it.
+the app only. It must not edit `~/.codex`, `~/.claude`, or `~/.cursor`;
+integration setup is performed interactively inside QPet so the user can
+review and trust it.

@@ -7,7 +7,8 @@ const DEFAULT_SETTINGS: AppSettings = {
   launchAtLogin: true,
   systemNotifications: true,
   soundNotifications: true,
-  petVisible: true
+  petVisible: true,
+  petTheme: 'classic'
 }
 
 export class SettingsStore {
@@ -57,6 +58,7 @@ export class SettingsStore {
       systemNotifications: candidate.systemNotifications !== false,
       soundNotifications: candidate.soundNotifications !== false,
       petVisible: candidate.petVisible !== false,
+      petTheme: candidate.petTheme === 'qmini' ? 'qmini' : 'classic',
       ...(petPosition && Number.isFinite(petPosition.x) && Number.isFinite(petPosition.y)
         ? { petPosition: { x: Math.round(petPosition.x), y: Math.round(petPosition.y) } }
         : {})

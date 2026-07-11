@@ -30,7 +30,13 @@ export function App(): React.JSX.Element {
   }, [announcement])
 
   if (mode === 'pet') {
-    return <Pet activities={controller.snapshot.activities} loading={controller.loading} />
+    return (
+      <Pet
+        activities={controller.snapshot.activities}
+        loading={controller.loading}
+        theme={controller.snapshot.settings.petTheme}
+      />
+    )
   }
 
   return (

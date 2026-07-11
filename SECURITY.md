@@ -1,8 +1,8 @@
 # Security policy
 
-QPet accepts local lifecycle events from Codex and Claude Code. Its design goal
-is to retain only normalized, minimal metadata and never persist prompts,
-transcripts, commands, assistant responses, or raw hook payloads.
+QPet accepts local lifecycle events from Codex, Claude Code, and Cursor. Its
+design goal is to retain only normalized, minimal metadata and never persist
+prompts, transcripts, commands, assistant responses, or raw hook payloads.
 
 ## Supported version
 

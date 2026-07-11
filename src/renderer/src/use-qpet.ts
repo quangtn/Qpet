@@ -12,6 +12,7 @@ const emptySnapshot: AppSnapshot = {
   activities: [],
   integrations: {
     listenerActive: false,
+    listenerMessage: 'Checking QPet’s local event listener…',
     codex: {
       provider: 'codex',
       health: 'unavailable',
@@ -35,8 +36,10 @@ const emptySnapshot: AppSnapshot = {
     launchAtLogin: true,
     systemNotifications: true,
     soundNotifications: true,
-    petVisible: true
-  }
+    petVisible: true,
+    petTheme: 'classic'
+  },
+  appVersion: '…'
 }
 
 function messageFrom(error: unknown): string {

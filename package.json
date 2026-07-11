@@ -2,7 +2,7 @@
   "name": "qpet",
   "version": "0.1.0",
   "private": true,
-  "description": "A floating macOS companion for Codex and Claude Code activity",
+  "description": "A floating macOS companion for Codex, Claude Code, and Cursor activity",
   "type": "module",
   "main": "out/main/index.js",
   "author": "Quang Nguyen <quangtn@gmail.com>",
@@ -61,6 +61,9 @@
     "mac": {
       "icon": "assets/pet/glasses-pet-master.png",
       "category": "public.app-category.developer-tools",
+      "extendInfo": {
+        "LSUIElement": true
+      },
       "target": [
         "dir",
         "dmg"

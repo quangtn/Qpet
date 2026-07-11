@@ -26,6 +26,7 @@ import type {
   IntegrationStatus,
   Provider
 } from '../shared/contracts'
+import { shellQuote } from '../shared/shell'
 import {
   discoverBinaries,
   type BinaryDiscoveryOptions,
@@ -74,9 +75,13 @@ export interface IntegrationManagerOptions {
   homeDir?: string
   appSupportDir?: string
   helperSourcePath?: string
+  codexHooksPath?: string
+  claudeSettingsPath?: string
+  cursorHooksPath?: string
   binaryDiscovery?: BinaryDiscoveryOptions
   discover?: () => Promise<Partial<Record<Provider, DiscoveredBinary>>>
   isListenerActive?: () => boolean
+  listenerMessage?: () => string | undefined
   now?: () => Date
 }
 
@@ -87,10 +92,6 @@ interface ConfigInspection {
 
 function isObject(value: unknown): value is JsonObject {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
-function shellQuote(value: string): string {
-  return `'${value.replaceAll("'", `'\\''`)}'`
 }
 
 function commandFor(helperPath: string, provider: Provider): string {
@@ -515,6 +516,26 @@ function unavailableDetail(
   }
 }
 
+const PROVIDER_LABELS: Record<Provider, string> = {
+  codex: 'Codex',
+  claude: 'Claude Code',
+  cursor: 'Cursor'
+}
+
+function installMessage(targets: readonly Provider[]): string {
+  const labels = targets.map((provider) => PROVIDER_LABELS[provider])
+  const list =
+    labels.length === 1
+      ? labels[0]
+      : labels.length === 2
+        ? `${labels[0]} and ${labels[1]}`
+        : `${labels.slice(0, -1).join(', ')}, and ${labels.at(-1)}`
+  const trustHint = targets.includes('codex')
+    ? ' Review and trust the Codex hooks with /hooks.'
+    : ''
+  return `QPet hooks installed for ${list}.${trustHint}`
+}
+
 export class IntegrationManager {
   readonly homeDir: string
   readonly appSupportDir: string
@@ -534,9 +555,15 @@ export class IntegrationManager {
       options.appSupportDir ?? join(this.homeDir, 'Library', 'Application Support', 'QPet')
     )
     this.helperPath = join(this.appSupportDir, QPET_HELPER_NAME)
-    this.codexHooksPath = join(this.homeDir, '.codex', 'hooks.json')
-    this.claudeSettingsPath = join(this.homeDir, '.claude', 'settings.json')
-    this.cursorHooksPath = join(this.homeDir, '.cursor', 'hooks.json')
+    this.codexHooksPath = resolve(
+      options.codexHooksPath ?? join(this.homeDir, '.codex', 'hooks.json')
+    )
+    this.claudeSettingsPath = resolve(
+      options.claudeSettingsPath ?? join(this.homeDir, '.claude', 'settings.json')
+    )
+    this.cursorHooksPath = resolve(
+      options.cursorHooksPath ?? join(this.homeDir, '.cursor', 'hooks.json')
+    )
     this.helperSourcePath = resolve(
       options.helperSourcePath ?? join(process.cwd(), 'resources', QPET_HELPER_NAME)
     )
@@ -553,6 +580,12 @@ export class IntegrationManager {
 
   private trustedMarkerPath(): string {
     return join(this.appSupportDir, 'codex-hooks-trusted')
+  }
+
+  private configPathFor(provider: Provider): string {
+    if (provider === 'codex') return this.codexHooksPath
+    if (provider === 'claude') return this.claudeSettingsPath
+    return this.cursorHooksPath
   }
 
   private async hasTrustMarker(): Promise<boolean> {
@@ -676,42 +709,59 @@ export class IntegrationManager {
       codex: detail('codex', codexInspection, binaries.codex),
       claude: detail('claude', claudeInspection, binaries.claude),
       cursor: detail('cursor', cursorInspection, binaries.cursor),
-      listenerActive
+      listenerActive,
+      ...(
+        listenerActive
+          ? {}
+          : {
+              listenerMessage:
+                this.options.listenerMessage?.() ??
+                'QPet’s local event listener is not running. Restart QPet, then use Refresh.'
+            }
+      )
     }
   }
 
   async install(): Promise<InstallResult> {
     return this.serialized(async () => {
       try {
-        // Validate both user-owned files before making either configuration
-        // change. This avoids a half-installed state when one file is invalid.
-        await Promise.all([
-          readJsonObject(this.codexHooksPath),
-          readJsonObject(this.claudeSettingsPath),
-          readJsonObject(this.cursorHooksPath)
-        ])
+        const binaries = await this.binaries()
+        const targets = (['codex', 'claude', 'cursor'] as const).filter(
+          (provider) => binaries[provider]?.capabilities.hooks
+        )
+        if (targets.length === 0) {
+          return {
+            ok: false,
+            message:
+              'No supported Codex, Claude Code, or Cursor CLI was found. Install a provider, then Refresh.',
+            status: await this.getStatus()
+          }
+        }
+
+        // Validate only the configs we will touch so an unused invalid file
+        // cannot block installing for a detected provider.
+        await Promise.all(
+          targets.map((provider) => readJsonObject(this.configPathFor(provider)))
+        )
         await this.copyHelper()
         const date = this.options.now?.() ?? new Date()
-        const codexChanged = await updateConfig(
-          this.codexHooksPath,
-          (config) => mergeQPetHooks(config, 'codex', this.helperPath),
-          date
-        )
-        await updateConfig(
-          this.claudeSettingsPath,
-          (config) => mergeQPetHooks(config, 'claude', this.helperPath),
-          date
-        )
-        await updateConfig(
-          this.cursorHooksPath,
-          (config) => mergeQPetCursorHooks(config, this.helperPath),
-          date
-        )
+        let codexChanged = false
+        for (const provider of targets) {
+          const changed = await updateConfig(
+            this.configPathFor(provider),
+            (config) =>
+              provider === 'cursor'
+                ? mergeQPetCursorHooks(config, this.helperPath)
+                : mergeQPetHooks(config, provider, this.helperPath),
+            date
+          )
+          if (provider === 'codex') codexChanged = changed
+        }
 
         if (codexChanged) await unlink(this.trustedMarkerPath()).catch(() => undefined)
         return {
           ok: true,
-          message: 'QPet hooks installed for Codex, Claude Code, and Cursor. Review and trust the Codex hooks with /hooks.',
+          message: installMessage(targets),
           status: await this.getStatus()
         }
       } catch (error) {

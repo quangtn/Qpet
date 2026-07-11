@@ -1,8 +1,9 @@
 import { useState } from 'react'
-import type { AppSettings, IntegrationDetail, Provider } from '@shared'
+import type { AppSettings, IntegrationDetail, PetTheme, Provider } from '@shared'
 import { Icon } from './icons'
 import { healthLabels } from './model'
 import type { QPetController } from './use-qpet'
+import { petBrandImage, petThemes } from './pet-themes'
 
 interface SettingsProps {
   controller: QPetController
@@ -69,7 +70,7 @@ export function Settings({
         <div className="onboarding-hero">
           <span className="onboarding-pet" aria-hidden="true">
             <span className="onboarding-aura" />
-            <img src="./pet/glasses-pet-master-256.png" alt="" />
+            <img className={`theme-${snapshot.settings.petTheme}`} src={petBrandImage(snapshot.settings.petTheme)} alt="" />
             <i>✦</i>
           </span>
           <p className="eyebrow">Your local coding companion</p>
@@ -109,6 +110,12 @@ export function Settings({
             cursor={snapshot.integrations.cursor}
             loading={loading}
           />
+          {!snapshot.integrations.listenerActive ? (
+            <p className="setup-error" role="alert">
+              {snapshot.integrations.listenerMessage ??
+                'QPet’s local event listener is not running. Restart QPet, then try again.'}
+            </p>
+          ) : null}
           {error ? <p className="setup-error" role="alert">{error}</p> : null}
         </section>
 
@@ -158,6 +165,10 @@ export function Settings({
           <h2 id="general-heading">General</h2>
         </div>
         <div className="settings-group">
+          <PetThemePicker
+            value={snapshot.settings.petTheme}
+            onChange={(petTheme) => controller.updateSettings({ petTheme })}
+          />
           <SettingToggle
             title="Launch at login"
             description="Keep QPet ready after you sign in."
@@ -201,7 +212,7 @@ export function Settings({
           </div>
           <SettingToggle
             title="Show floating pet"
-            description="Keep QPet above your other windows."
+            description="Hide the pet while keeping a QPet recovery icon in the menu bar."
             checked={snapshot.settings.petVisible}
             onChange={(petVisible) => controller.updateSettings({ petVisible })}
           />
@@ -230,6 +241,16 @@ export function Settings({
           <IntegrationCard detail={snapshot.integrations.claude} />
           <IntegrationCard detail={snapshot.integrations.cursor} />
         </div>
+
+        {!snapshot.integrations.listenerActive ? (
+          <div className="trust-notice listener-notice" role="alert">
+            <span>!</span>
+            <p>
+              {snapshot.integrations.listenerMessage ??
+                'QPet’s local event listener is not running. Restart QPet, then use Refresh.'}
+            </p>
+          </div>
+        ) : null}
 
         {snapshot.integrations.codex.health === 'awaiting_trust' ? (
           <div className="trust-notice" role="status">
@@ -276,10 +297,48 @@ export function Settings({
       </section>
 
       <footer className="settings-footer">
-        <span>QPet 0.1</span>
+        <span>QPet {snapshot.appVersion}</span>
         <button type="button" onClick={() => void window.qpet.quit()}>Quit QPet</button>
       </footer>
     </main>
+  )
+}
+
+function PetThemePicker({
+  value,
+  onChange
+}: {
+  value: PetTheme
+  onChange(value: PetTheme): Promise<AppSettings>
+}): React.JSX.Element {
+  const [busy, setBusy] = useState(false)
+  return (
+    <div className="pet-theme-setting">
+      <span>
+        <strong>Pet style</strong>
+        <small>Choose the companion that appears across QPet.</small>
+      </span>
+      <div className="pet-theme-options" role="radiogroup" aria-label="Pet style">
+        {petThemes.map((theme) => (
+          <button
+            key={theme.id}
+            className="pet-theme-option"
+            type="button"
+            role="radio"
+            aria-checked={value === theme.id}
+            disabled={busy}
+            onClick={() => {
+              if (theme.id === value) return
+              setBusy(true)
+              void onChange(theme.id).finally(() => setBusy(false))
+            }}
+          >
+            <img className={`theme-${theme.id}`} src={theme.brandImage} alt="" />
+            <span><strong>{theme.name}</strong><small>{theme.description}</small></span>
+          </button>
+        ))}
+      </div>
+    </div>
   )
 }
 

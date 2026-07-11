@@ -42,6 +42,12 @@ describe('provider event normalizers', () => {
       live: true
     })
     expect(JSON.stringify(working)).not.toContain('TOP SECRET')
+    expect(normalizeCursorEvent({ ...base, hook_event_name: 'afterAgentResponse' })).toMatchObject({
+      state: 'ready',
+      summary: 'Cursor finished',
+      unread: true,
+      live: false
+    })
     expect(normalizeCursorEvent({ ...base, hook_event_name: 'stop' })).toMatchObject({
       state: 'ready',
       summary: 'Cursor finished',

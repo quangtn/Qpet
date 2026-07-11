@@ -1,13 +1,9 @@
 import type { Activity, IntegrationHealth, PetState } from '@shared'
+import { sortActivities } from '@shared'
 
 export type PetMood = PetState | 'sleeping'
 
-export const statePriority: Record<PetState, number> = {
-  needs_input: 0,
-  blocked: 1,
-  running: 2,
-  ready: 3
-}
+export { sortActivities }
 
 export const stateLabels: Record<PetMood, string> = {
   sleeping: 'Sleeping',
@@ -31,13 +27,6 @@ export const healthLabels: Record<IntegrationHealth, string> = {
   healthy: 'Connected',
   unavailable: 'Unavailable',
   error: 'Needs attention'
-}
-
-export function sortActivities(activities: Activity[]): Activity[] {
-  return [...activities].sort((a, b) => {
-    const priority = statePriority[a.state] - statePriority[b.state]
-    return priority || b.updatedAt - a.updatedAt
-  })
 }
 
 export function getPetMood(activities: Activity[]): PetMood {

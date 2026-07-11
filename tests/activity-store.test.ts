@@ -7,7 +7,8 @@ import { afterEach, describe, expect, it } from 'vitest'
 import {
   ACTIVITY_RETENTION_MS,
   ActivityStore,
-  CODEX_STALE_AFTER_MS
+  CODEX_STALE_AFTER_MS,
+  CURSOR_STALE_AFTER_MS
 } from '../src/main/activity-store'
 
 const temporaryDirectories: string[] = []
@@ -159,6 +160,21 @@ describe('ActivityStore', () => {
     expect(store.getActivities().map((activity) => activity.sessionId)).toEqual(['ready'])
 
     now = ACTIVITY_RETENTION_MS
+    expect(await store.cleanup()).toBe(1)
+    expect(store.getActivities()).toEqual([])
+  })
+
+  it('expires orphaned Cursor work after two hours without lifecycle updates', async () => {
+    let now = 0
+    const { store } = await makeStore(() => now)
+    await store.ingest('cursor', {
+      conversation_id: 'orphaned-cursor',
+      cwd: '/tmp/project',
+      hook_event_name: 'beforeSubmitPrompt'
+    })
+    expect(store.getActivities()).toHaveLength(1)
+
+    now = CURSOR_STALE_AFTER_MS
     expect(await store.cleanup()).toBe(1)
     expect(store.getActivities()).toEqual([])
   })

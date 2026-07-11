@@ -1,6 +1,7 @@
 import { useRef, useState, type PointerEvent } from 'react'
-import type { Activity, Provider } from '@shared'
+import type { Activity, PetTheme, Provider } from '@shared'
 import { getPetMood, stateDescriptions, stateLabels, type PetMood } from './model'
+import { petStateImage } from './pet-themes'
 
 const moodGlyphs: Record<PetMood, string> = {
   sleeping: 'z',
@@ -8,14 +9,6 @@ const moodGlyphs: Record<PetMood, string> = {
   needs_input: '!',
   ready: '✓',
   blocked: '×'
-}
-
-const moodSprites: Record<PetMood, string> = {
-  sleeping: './pet/states/sleeping.png',
-  running: './pet/states/working.png',
-  needs_input: './pet/states/awaiting-input.png',
-  ready: './pet/states/success.png',
-  blocked: './pet/states/error.png'
 }
 
 const providers: readonly Provider[] = ['codex', 'claude', 'cursor']
@@ -56,9 +49,10 @@ function summarizeProvider(activities: Activity[]): ProviderSummary | null {
 interface PetProps {
   activities: Activity[]
   loading: boolean
+  theme: PetTheme
 }
 
-export function Pet({ activities, loading }: PetProps): React.JSX.Element {
+export function Pet({ activities, loading, theme }: PetProps): React.JSX.Element {
   const drag = useRef<{
     pointerId: number
     startX: number
@@ -124,7 +118,7 @@ export function Pet({ activities, loading }: PetProps): React.JSX.Element {
   }
 
   return (
-    <main className="pet-window" data-testid="pet-window" data-state={mood}>
+    <main className="pet-window" data-testid="pet-window" data-state={mood} data-theme={theme}>
       <button
         className="pet-button"
         data-testid="pet"
@@ -152,8 +146,8 @@ export function Pet({ activities, loading }: PetProps): React.JSX.Element {
           <i />
         </span>
         <img
-          className="pet-sprite"
-          src={moodSprites[mood]}
+          className={`pet-sprite theme-${theme}`}
+          src={petStateImage(theme, mood)}
           draggable="false"
           alt=""
         />

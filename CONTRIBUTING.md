@@ -1,7 +1,7 @@
 # Contributing to QPet
 
-QPet is a local, notification-only companion for Codex and Claude Code. Small,
-focused changes are easiest to review and safest to maintain.
+QPet is a local, notification-only companion for Codex, Claude Code, and
+Cursor. Small, focused changes are easiest to review and safest to maintain.
 
 ## Setup
 
@@ -29,7 +29,8 @@ packaging, run `npm run package:mac && npm run smoke:package`.
 - Keep integrations notification-only. Embedded chat, approvals, file editing,
   and managed provider sessions are outside V0.
 - Hook installation and removal must preserve unrelated settings and be safe to
-  repeat.
+  repeat. Install only for detected provider CLIs; uninstall still removes
+  QPet-owned handlers from all supported provider configs.
 - Do not make a renderer capable of arbitrary file or process access.
 - Keep macOS-specific code isolated. Do not advertise Windows or Intel-Mac
   compatibility until it is tested and packaged.

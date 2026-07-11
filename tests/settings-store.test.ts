@@ -13,7 +13,8 @@ describe('SettingsStore', () => {
       launchAtLogin: true,
       systemNotifications: true,
       soundNotifications: true,
-      petVisible: true
+      petVisible: true,
+      petTheme: 'classic'
     })
 
     const updated = await store.update({
@@ -25,6 +26,7 @@ describe('SettingsStore', () => {
       systemNotifications: false,
       soundNotifications: true,
       petVisible: true,
+      petTheme: 'classic',
       petPosition: { x: 16, y: 21 }
     })
 
@@ -46,10 +48,24 @@ describe('SettingsStore', () => {
       launchAtLogin: true,
       systemNotifications: false,
       soundNotifications: true,
-      petVisible: false
+      petVisible: false,
+      petTheme: 'classic'
     })
     expect(JSON.parse(await readFile(join(directory, 'settings.json'), 'utf8'))).toEqual(
       store.get()
     )
+  })
+
+  it('persists a supported pet theme and falls back safely for unknown values', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'qpet-theme-'))
+    const store = new SettingsStore(directory)
+    await store.initialize()
+
+    expect((await store.update({ petTheme: 'qmini' })).petTheme).toBe('qmini')
+    await import('node:fs/promises').then(({ writeFile }) =>
+      writeFile(join(directory, 'settings.json'), JSON.stringify({ petTheme: 'unknown' }))
+    )
+    const reloaded = new SettingsStore(directory)
+    expect((await reloaded.initialize()).petTheme).toBe('classic')
   })
 })
