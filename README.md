@@ -5,7 +5,7 @@ QPet is a small, floating macOS companion for local Codex, Claude Code, and Curs
 QPet is open source under the [MIT License](LICENSE). It is a personal, local-first app: no account, cloud service, or telemetry is required.
 
 <p align="center">
-  <img src="docs/screenshots/qpet-working.png" alt="QPet showing active Codex, Claude, and Cursor sessions" width="452">
+  <img src="docs/screenshots/qpet-working.png" alt="QPet showing active Codex, Claude, and Cursor sessions" width="404">
 </p>
 
 ## V0 behavior
