@@ -1,18 +1,21 @@
 import { Notification } from 'electron'
 import { spawn } from 'node:child_process'
-import type { Activity } from '@shared'
+import type { Activity, SoundTrigger } from '@shared'
 
-const MACOS_ALERT_SOUND = '/System/Library/Sounds/Glass.aiff'
+const MACOS_SOUNDS: Readonly<Record<'attention' | 'ready', string>> = {
+  attention: '/System/Library/Sounds/Glass.aiff',
+  ready: '/System/Library/Sounds/Hero.aiff'
+}
 
 /**
  * Sound is intentionally played outside the native Notification API: unsigned
  * macOS Electron builds cannot deliver UNNotification banners, while `afplay`
  * remains a local, dependable attention cue.
  */
-export function playMacNotificationSound(): void {
+export function playMacNotificationSound(trigger: SoundTrigger = 'needs_input'): void {
   if (process.platform !== 'darwin') return
   try {
-    const player = spawn('/usr/bin/afplay', [MACOS_ALERT_SOUND], {
+    const player = spawn('/usr/bin/afplay', [macSoundPath(trigger)], {
       detached: true,
       stdio: 'ignore',
       windowsHide: true
@@ -24,15 +27,19 @@ export function playMacNotificationSound(): void {
   }
 }
 
+export function macSoundPath(trigger: SoundTrigger): string {
+  return trigger === 'ready' ? MACOS_SOUNDS.ready : MACOS_SOUNDS.attention
+}
+
 export class NotificationManager {
-  private readonly seen = new Map<string, string>()
+  private readonly seen = new Map<string, { signature: string; state: Activity['state'] }>()
   private primed = false
 
   constructor(
     private readonly enabled: () => boolean,
     private readonly onClick: () => void,
-    private readonly soundEnabled: () => boolean = () => false,
-    private readonly playSound: () => void = playMacNotificationSound
+    private readonly soundTriggers: () => readonly SoundTrigger[] = () => [],
+    private readonly playSound: (trigger: SoundTrigger) => void = playMacNotificationSound
   ) {}
 
   handle(activities: Activity[]): void {
@@ -50,14 +57,22 @@ export class NotificationManager {
     for (const activity of activities) {
       const signature = this.signature(activity)
       const previous = this.seen.get(activity.id)
-      this.seen.set(activity.id, signature)
+      this.seen.set(activity.id, { signature, state: activity.state })
 
-      const needsAttention = activity.state === 'needs_input' || activity.state === 'blocked'
-      if (previous === signature || !activity.unread || !needsAttention) {
-        continue
+      const soundTrigger = toSoundTrigger(activity.state)
+      if (
+        soundTrigger &&
+        (soundTrigger === 'ready' || activity.unread) &&
+        previous?.state !== activity.state &&
+        this.soundTriggers().includes(soundTrigger)
+      ) {
+        this.playSound(soundTrigger)
       }
 
-      if (this.soundEnabled()) this.playSound()
+      const needsAttention = activity.state === 'needs_input' || activity.state === 'blocked'
+      if (previous?.signature === signature || !activity.unread || !needsAttention) {
+        continue
+      }
 
       if (!this.enabled() || !Notification.isSupported()) continue
 
@@ -81,10 +96,19 @@ export class NotificationManager {
   }
 
   private remember(activity: Activity): void {
-    this.seen.set(activity.id, this.signature(activity))
+    this.seen.set(activity.id, {
+      signature: this.signature(activity),
+      state: activity.state
+    })
   }
 
   private signature(activity: Activity): string {
     return `${activity.state}:${activity.updatedAt}`
   }
+}
+
+function toSoundTrigger(state: Activity['state']): SoundTrigger | undefined {
+  return state === 'needs_input' || state === 'blocked' || state === 'ready'
+    ? state
+    : undefined
 }

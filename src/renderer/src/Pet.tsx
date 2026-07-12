@@ -1,11 +1,11 @@
 import { useRef, useState, type PointerEvent } from 'react'
-import type { Activity, PetTheme, Provider } from '@shared'
+import type { Activity, DictationStatus, PetTheme, Provider } from '@shared'
 import { getPetMood, stateDescriptions, stateLabels, type PetMood } from './model'
 import { petStateImage } from './pet-themes'
 
 const moodGlyphs: Record<PetMood, string> = {
   sleeping: 'z',
-  running: '›',
+  running: '',
   needs_input: '!',
   ready: '✓',
   blocked: '×'
@@ -50,9 +50,10 @@ interface PetProps {
   activities: Activity[]
   loading: boolean
   theme: PetTheme
+  dictation: DictationStatus
 }
 
-export function Pet({ activities, loading, theme }: PetProps): React.JSX.Element {
+export function Pet({ activities, loading, theme, dictation }: PetProps): React.JSX.Element {
   const drag = useRef<{
     pointerId: number
     startX: number
@@ -61,7 +62,26 @@ export function Pet({ activities, loading, theme }: PetProps): React.JSX.Element
   } | null>(null)
   const suppressClick = useRef(false)
   const [dragging, setDragging] = useState(false)
-  const mood = loading ? 'sleeping' : getPetMood(activities)
+  const activityMood = loading ? 'sleeping' : getPetMood(activities)
+  const dictationActive = dictation.state !== 'idle'
+  const mood: PetMood = dictation.state === 'listening' || dictation.state === 'transcribing'
+    ? 'running'
+    : dictation.state === 'copied' || dictation.state === 'reviewing'
+      ? 'ready'
+      : dictation.state === 'error'
+        ? 'blocked'
+        : activityMood
+  const dictationLabel = dictation.state === 'listening'
+    ? 'Listening'
+    : dictation.state === 'transcribing'
+      ? 'Transcribing'
+      : dictation.state === 'copied'
+        ? 'Copied'
+        : dictation.state === 'reviewing'
+          ? 'Review text'
+          : dictation.state === 'error'
+            ? 'Dictation error'
+            : undefined
   const attentionCount = activities.filter(
     (activity) => activity.state === 'needs_input' || activity.state === 'blocked'
   ).length
@@ -69,7 +89,9 @@ export function Pet({ activities, loading, theme }: PetProps): React.JSX.Element
     const summary = summarizeProvider(activities.filter((activity) => activity.provider === provider))
     return summary ? [{ provider, ...summary }] : []
   })
-  const ariaLabel = `${stateLabels[mood]}. ${stateDescriptions[mood]}. Open QPet activity.`
+  const ariaLabel = dictationLabel
+    ? `${dictationLabel}. ${dictation.message ?? 'Use the dictation shortcut to continue.'}`
+    : `${stateLabels[mood]}. ${stateDescriptions[mood]}. Open QPet activity.`
 
   const endDrag = (event: PointerEvent<HTMLButtonElement>): void => {
     if (!drag.current || drag.current.pointerId !== event.pointerId) return
@@ -118,7 +140,7 @@ export function Pet({ activities, loading, theme }: PetProps): React.JSX.Element
   }
 
   return (
-    <main className="pet-window" data-testid="pet-window" data-state={mood} data-theme={theme}>
+    <main className="pet-window" data-testid="pet-window" data-state={mood} data-theme={theme} data-dictation={dictation.state}>
       <button
         className="pet-button"
         data-testid="pet"
@@ -162,13 +184,18 @@ export function Pet({ activities, loading, theme }: PetProps): React.JSX.Element
         </span>
         <span className="blocked-bolt" aria-hidden="true">⌁</span>
         <span className="pet-state-badge" aria-hidden="true">
-          {moodGlyphs[mood]}
+          {mood === 'running' ? <span className="working-clock" /> : moodGlyphs[mood]}
           {attentionCount > 1 && mood === 'needs_input' ? (
             <small>{Math.min(attentionCount, 9)}</small>
           ) : null}
         </span>
+        {dictationLabel ? (
+          <span className={`dictation-state-label state-${dictation.state}`} role="status">
+            {dictationLabel}
+          </span>
+        ) : null}
       </button>
-      {providerSummaries.length > 0 ? (
+      {!dictationActive && providerSummaries.length > 0 ? (
         <aside
           className="provider-statuses"
           data-count={providerSummaries.length}

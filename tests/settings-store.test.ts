@@ -13,6 +13,9 @@ describe('SettingsStore', () => {
       launchAtLogin: true,
       systemNotifications: true,
       soundNotifications: true,
+      soundTriggers: ['needs_input', 'blocked', 'ready'],
+      dictationEnabled: false,
+      dictationSounds: true,
       petVisible: true,
       petTheme: 'classic'
     })
@@ -25,6 +28,9 @@ describe('SettingsStore', () => {
       launchAtLogin: true,
       systemNotifications: false,
       soundNotifications: true,
+      soundTriggers: ['needs_input', 'blocked', 'ready'],
+      dictationEnabled: false,
+      dictationSounds: true,
       petVisible: true,
       petTheme: 'classic',
       petPosition: { x: 16, y: 21 }
@@ -48,6 +54,7 @@ describe('SettingsStore', () => {
       launchAtLogin: true,
       systemNotifications: false,
       soundNotifications: true,
+      soundTriggers: ['needs_input', 'blocked', 'ready'],
       petVisible: false,
       petTheme: 'classic'
     })
@@ -67,5 +74,42 @@ describe('SettingsStore', () => {
     )
     const reloaded = new SettingsStore(directory)
     expect((await reloaded.initialize()).petTheme).toBe('classic')
+  })
+
+  it('migrates and normalizes sound trigger selections', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'qpet-sounds-'))
+    const settingsPath = join(directory, 'settings.json')
+    await import('node:fs/promises').then(({ writeFile }) =>
+      writeFile(settingsPath, JSON.stringify({ soundNotifications: false }))
+    )
+    const migrated = new SettingsStore(directory)
+    expect(await migrated.initialize()).toMatchObject({
+      soundNotifications: false,
+      soundTriggers: ['needs_input', 'blocked', 'ready']
+    })
+    expect(JSON.parse(await readFile(settingsPath, 'utf8')).soundTriggers).toEqual([
+      'needs_input',
+      'blocked',
+      'ready'
+    ])
+
+    await import('node:fs/promises').then(({ writeFile }) =>
+      writeFile(
+        settingsPath,
+        JSON.stringify({ soundTriggers: ['ready', 'invalid', 'ready', 'needs_input'] })
+      )
+    )
+    const normalized = new SettingsStore(directory)
+    expect((await normalized.initialize()).soundTriggers).toEqual(['needs_input', 'ready'])
+
+    await import('node:fs/promises').then(({ writeFile }) =>
+      writeFile(settingsPath, JSON.stringify({ soundTriggers: [] }))
+    )
+    const empty = new SettingsStore(directory)
+    expect((await empty.initialize()).soundTriggers).toEqual([
+      'needs_input',
+      'blocked',
+      'ready'
+    ])
   })
 })

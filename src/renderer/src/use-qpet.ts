@@ -36,8 +36,15 @@ const emptySnapshot: AppSnapshot = {
     launchAtLogin: true,
     systemNotifications: true,
     soundNotifications: true,
+    soundTriggers: ['needs_input', 'blocked', 'ready'],
+    dictationEnabled: false,
+    dictationSounds: true,
     petVisible: true,
     petTheme: 'classic'
+  },
+  dictation: {
+    state: 'idle',
+    shortcut: 'Control+Option+Space'
   },
   appVersion: '…'
 }

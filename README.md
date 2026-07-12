@@ -15,10 +15,32 @@ QPet is open source under the [MIT License](LICENSE). It is a personal, local-fi
 - Prioritizes pet activity as: **needs input → blocked → working → ready → idle**.
 - Lets users choose between the original Classic pixel pet and the smooth canonical Qmini theme in Settings.
 - Sends macOS notifications only when a session needs input or is blocked.
+- Lets users select sound triggers for Needs input, Blocked, and Ready, with distinct attention and completion sounds.
+- Offers an optional **Dictation Beta** that listens only on a global shortcut, previews the final Apple Speech transcription, and copies it only after confirmation without saving audio or text.
 - Provides safe project, attach, resume, and copy-command actions without resuming a live session twice.
 - Runs as a macOS accessory app so the pet stays above normal and fullscreen Spaces; use the pet or its tray for Settings and Quit because QPet does not appear in the Dock or Command–Tab.
 - Runs locally. It does not monitor Claude Desktop/web chats or embed a provider agent SDK.
 - Cursor reports working and completion lifecycle states, but does not expose a reliable approval-request hook for QPet's Needs input state.
+
+## Screenshots
+
+### Settings
+
+Choose a pet style and configure launch behavior, system notifications, sound
+triggers, and other QPet preferences.
+
+<p align="center">
+  <img src="docs/screenshots/qpet-settings-general.png" alt="QPet General settings with pet styles, notification controls, and sound triggers" width="760">
+</p>
+
+### Activity tray
+
+Review prioritized Codex, Claude Code, and Cursor sessions, then open, resume,
+copy, or dismiss an activity from one compact list.
+
+<p align="center">
+  <img src="docs/screenshots/qpet-activity-tray.png" alt="QPet activity tray showing Codex and Claude Code sessions with safe actions" width="560">
+</p>
 
 ## Install from source
 
@@ -27,6 +49,7 @@ Requirements on the current target machine:
 - Apple Silicon macOS
 - Node.js 22+
 - npm
+- Xcode Command Line Tools (`xcode-select --install`) to compile the local dictation helper
 - Optional: Codex CLI, Claude Code, and/or Cursor. QPet can be installed without all three;
   its onboarding reports each integration's availability.
 
@@ -118,6 +141,19 @@ Open QPet Settings and choose **Install integrations**. QPet will:
 Codex requires explicit hook trust. After installation, open `/hooks` in a new Codex session and approve the QPet hook definition. QPet never bypasses this trust check.
 
 Uninstalling integrations removes only handlers whose command points to QPet's installed relay. Hooks fail open within one second when QPet is not running.
+
+## Dictation Beta
+
+Dictation is disabled by default and lives in its own Settings tab. Enable it,
+then press **Control + Option + Space** to start listening and press the shortcut
+again to stop. QPet copies only the final transcription to the clipboard and
+shows live partial text in a temporary overlay. When recognition finishes, the
+overlay makes the final text editable and offers **Copy**, **Try again**, and
+**Dismiss**; nothing is copied until you choose **Copy**.
+The preview stays in memory only; QPet does not write audio or transcription
+text to disk. The first use asks for
+macOS Microphone and Speech Recognition permissions. Apple Speech Recognition
+may use Apple services depending on the current language and system support.
 
 ## Optional code signing
 

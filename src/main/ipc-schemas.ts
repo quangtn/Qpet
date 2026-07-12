@@ -1,9 +1,11 @@
 import { z } from 'zod'
 import type {
   AppSettings,
+  DictationAction,
   Provider,
   ScreenPoint,
-  SessionActionRequest
+  SessionActionRequest,
+  SoundTrigger
 } from '@shared'
 
 const activityIdSchema = z.string().min(1).max(512)
@@ -16,6 +18,9 @@ const settingsPatchSchema = z
     launchAtLogin: z.boolean().optional(),
     systemNotifications: z.boolean().optional(),
     soundNotifications: z.boolean().optional(),
+    soundTriggers: z.array(z.enum(['needs_input', 'blocked', 'ready'])).max(3).optional(),
+    dictationEnabled: z.boolean().optional(),
+    dictationSounds: z.boolean().optional(),
     petVisible: z.boolean().optional(),
     petTheme: z.enum(['classic', 'qmini']).optional()
   })
@@ -27,6 +32,9 @@ const screenPointSchema = z
   })
   .strict()
 const providerSchema = z.enum(['codex', 'claude', 'cursor'])
+const soundTriggerSchema = z.enum(['needs_input', 'blocked', 'ready'])
+const dictationActionSchema = z.enum(['copy', 'retry', 'cancel'])
+const dictationTextSchema = z.string().max(64 * 1024)
 
 export function parseActivityId(raw: unknown): string {
   return activityIdSchema.parse(raw)
@@ -46,4 +54,16 @@ export function parseScreenPoint(raw: unknown): ScreenPoint {
 
 export function parseProvider(raw: unknown): Provider {
   return providerSchema.parse(raw)
+}
+
+export function parseSoundTrigger(raw: unknown): SoundTrigger {
+  return soundTriggerSchema.parse(raw)
+}
+
+export function parseDictationAction(raw: unknown): DictationAction {
+  return dictationActionSchema.parse(raw)
+}
+
+export function parseDictationText(raw: unknown): string {
+  return dictationTextSchema.parse(raw)
 }

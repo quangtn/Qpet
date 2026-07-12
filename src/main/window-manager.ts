@@ -8,6 +8,8 @@ const PET_WIDTH = 190
 const PET_HEIGHT = 112
 const TRAY_WIDTH = 520
 const TRAY_HEIGHT = 650
+const DICTATION_WIDTH = 380
+const DICTATION_HEIGHT = 220
 const MODULE_DIRECTORY = dirname(fileURLToPath(import.meta.url))
 
 interface WindowManagerOptions {
@@ -21,6 +23,7 @@ export class WindowManager {
   private petWindow: BrowserWindow | null = null
   private trayWindow: BrowserWindow | null = null
   private settingsWindow: BrowserWindow | null = null
+  private dictationWindow: BrowserWindow | null = null
   private settingsRoute: 'settings' | 'onboarding' = 'settings'
   private moveTimer: NodeJS.Timeout | null = null
   private petDragOffset: ScreenPoint | null = null
@@ -97,6 +100,30 @@ export class WindowManager {
       this.trayWindow = null
     })
 
+    this.dictationWindow = new BrowserWindow({
+      width: DICTATION_WIDTH,
+      height: DICTATION_HEIGHT,
+      frame: false,
+      transparent: true,
+      backgroundColor: '#00000000',
+      resizable: false,
+      maximizable: false,
+      minimizable: false,
+      fullscreenable: false,
+      show: false,
+      alwaysOnTop: true,
+      hasShadow: true,
+      skipTaskbar: true,
+      title: 'QPet Dictation Preview',
+      webPreferences: this.webPreferences()
+    })
+    this.pinAboveFullScreen(this.dictationWindow)
+    this.lockNavigation(this.dictationWindow)
+    this.loadRoute(this.dictationWindow, 'dictation')
+    this.dictationWindow.on('closed', () => {
+      this.dictationWindow = null
+    })
+
     screen.on('display-removed', this.clampPetToDisplay)
     screen.on('display-metrics-changed', this.clampPetToDisplay)
   }
@@ -118,6 +145,23 @@ export class WindowManager {
 
   hideTray(): void {
     this.trayWindow?.hide()
+  }
+
+  setDictationPreviewVisible(visible: boolean, focus = false): void {
+    if (!this.dictationWindow || !this.petWindow) return
+    if (!visible) {
+      this.dictationWindow.hide()
+      return
+    }
+    this.positionDictationPreview()
+    this.pinAboveFullScreen(this.dictationWindow)
+    if (focus) {
+      this.dictationWindow.show()
+      this.dictationWindow.focus()
+    } else {
+      this.dictationWindow.showInactive()
+    }
+    this.dictationWindow.moveTop()
   }
 
   beginPetDrag(point: ScreenPoint): void {
@@ -202,7 +246,7 @@ export class WindowManager {
   }
 
   broadcast(snapshot: AppSnapshot): void {
-    for (const window of [this.petWindow, this.trayWindow, this.settingsWindow]) {
+    for (const window of [this.petWindow, this.trayWindow, this.settingsWindow, this.dictationWindow]) {
       if (window && !window.isDestroyed()) {
         window.webContents.send(IPC.snapshotChanged, snapshot)
       }
@@ -215,6 +259,7 @@ export class WindowManager {
     screen.removeListener('display-removed', this.clampPetToDisplay)
     screen.removeListener('display-metrics-changed', this.clampPetToDisplay)
     this.settingsWindow?.destroy()
+    this.dictationWindow?.destroy()
     this.trayWindow?.destroy()
     this.petWindow?.destroy()
   }
@@ -232,7 +277,7 @@ export class WindowManager {
 
   private loadRoute(
     window: BrowserWindow,
-    route: 'pet' | 'tray' | 'settings' | 'onboarding'
+    route: 'pet' | 'tray' | 'settings' | 'onboarding' | 'dictation'
   ): void {
     const devUrl = app.isPackaged ? undefined : process.env.ELECTRON_RENDERER_URL
     if (devUrl) {
@@ -285,6 +330,24 @@ export class WindowManager {
       workArea.y + workArea.height - TRAY_HEIGHT
     )
     this.trayWindow.setPosition(Math.round(x), Math.round(y), false)
+  }
+
+  private positionDictationPreview(): void {
+    if (!this.petWindow || !this.dictationWindow) return
+    const petBounds = this.petWindow.getBounds()
+    const display = screen.getDisplayMatching(petBounds)
+    const workArea = display.workArea
+    const gap = 10
+    let x = petBounds.x + petBounds.width + gap
+    if (x + DICTATION_WIDTH > workArea.x + workArea.width) {
+      x = petBounds.x - DICTATION_WIDTH - gap
+    }
+    x = Math.min(Math.max(x, workArea.x), workArea.x + workArea.width - DICTATION_WIDTH)
+    const y = Math.min(
+      Math.max(petBounds.y + Math.round((petBounds.height - DICTATION_HEIGHT) / 2), workArea.y),
+      workArea.y + workArea.height - DICTATION_HEIGHT
+    )
+    this.dictationWindow.setPosition(Math.round(x), Math.round(y), false)
   }
 
   private schedulePositionSave(): void {

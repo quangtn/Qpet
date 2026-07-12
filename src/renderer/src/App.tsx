@@ -1,15 +1,17 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Pet } from './Pet'
+import { DictationPreview } from './DictationPreview'
 import { Settings } from './Settings'
 import { Tray } from './Tray'
 import { useQPet } from './use-qpet'
 
-export type WindowMode = 'pet' | 'tray' | 'onboarding' | 'settings'
+export type WindowMode = 'pet' | 'tray' | 'onboarding' | 'settings' | 'dictation'
 
 export function getWindowMode(search = window.location.search): WindowMode {
   const requested = new URLSearchParams(search).get('window')?.toLowerCase()
   if (requested === 'pet') return 'pet'
   if (requested === 'onboarding') return 'onboarding'
+  if (requested === 'dictation') return 'dictation'
   if (requested === 'settings' || requested === 'onboarding/settings') return 'settings'
   return 'tray'
 }
@@ -35,9 +37,12 @@ export function App(): React.JSX.Element {
         activities={controller.snapshot.activities}
         loading={controller.loading}
         theme={controller.snapshot.settings.petTheme}
+        dictation={controller.snapshot.dictation}
       />
     )
   }
+
+  if (mode === 'dictation') return <DictationPreview controller={controller} />
 
   return (
     <>

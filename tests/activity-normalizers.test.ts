@@ -60,6 +60,12 @@ describe('provider event normalizers', () => {
       close: true
     })
     expect(normalizeCursorEvent({ ...base, hook_event_name: 'postToolUseFailure' })).toBeNull()
+    expect(normalizeClaudeEvent({ ...base, hook_event_name: 'PostToolUse' })).toBeNull()
+    expect(normalizeCursorEvent({
+      session_id: 'claude-shaped',
+      cwd: '/tmp/project',
+      hook_event_name: 'postToolUse'
+    })).toBeNull()
   })
 
   it('maps Codex lifecycle events without retaining prompts or commands', () => {

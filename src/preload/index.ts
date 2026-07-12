@@ -34,7 +34,11 @@ const api: QPetApi = {
   endPetDrag: () => ipcRenderer.invoke(IPC.petDragEnd) as Promise<void>,
   openProviderApp: (provider) =>
     ipcRenderer.invoke(IPC.providerAppOpen, provider) as Promise<ActionResult>,
-  playTestSound: () => ipcRenderer.invoke(IPC.soundPlayTest) as Promise<void>,
+  playTestSound: (trigger) =>
+    ipcRenderer.invoke(IPC.soundPlayTest, trigger) as Promise<void>,
+  toggleDictation: () => ipcRenderer.invoke(IPC.dictationToggle) as Promise<void>,
+  performDictationAction: (action, text) =>
+    ipcRenderer.invoke(IPC.dictationAction, action, text) as Promise<void>,
   toggleTray: () => ipcRenderer.invoke(IPC.trayToggle) as Promise<void>,
   hideTray: () => ipcRenderer.invoke(IPC.trayHide) as Promise<void>,
   showSettings: () => ipcRenderer.invoke(IPC.settingsShow) as Promise<void>,

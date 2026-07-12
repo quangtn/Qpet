@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import type { AppSettings, IntegrationDetail, PetTheme, Provider } from '@shared'
+import type { AppSettings, IntegrationDetail, PetTheme, Provider, SoundTrigger } from '@shared'
 import { Icon } from './icons'
 import { healthLabels } from './model'
 import type { QPetController } from './use-qpet'
@@ -17,8 +17,11 @@ export function Settings({
   announce
 }: SettingsProps): React.JSX.Element {
   const { snapshot, loading, error } = controller
-  const [busy, setBusy] = useState<'install' | 'uninstall' | 'refresh' | 'sound'>()
+  const [busy, setBusy] = useState<
+    'install' | 'uninstall' | 'refresh' | 'sound-alert' | 'sound-ready'
+  >()
   const [setupComplete, setSetupComplete] = useState(false)
+  const [activeTab, setActiveTab] = useState<'general' | 'integrations' | 'dictation'>('general')
   const installed =
     snapshot.integrations.codex.installed ||
     snapshot.integrations.claude.installed ||
@@ -160,7 +163,19 @@ export function Settings({
         </button>
       </header>
 
-      <section className="settings-section" aria-labelledby="general-heading">
+      <nav className="settings-tabs" aria-label="Settings sections">
+        <button type="button" aria-current={activeTab === 'general' ? 'page' : undefined} onClick={() => setActiveTab('general')}>
+          General
+        </button>
+        <button type="button" aria-current={activeTab === 'integrations' ? 'page' : undefined} onClick={() => setActiveTab('integrations')}>
+          Integrations
+        </button>
+        <button type="button" aria-current={activeTab === 'dictation' ? 'page' : undefined} onClick={() => setActiveTab('dictation')}>
+          Dictation <em>Beta</em>
+        </button>
+      </nav>
+
+      {activeTab === 'general' ? <section className="settings-section" aria-labelledby="general-heading">
         <div className="settings-section-title">
           <h2 id="general-heading">General</h2>
         </div>
@@ -185,30 +200,49 @@ export function Settings({
           />
           <SettingToggle
             title="Notification sounds"
-            description="Play a macOS sound for input requests and blockers."
+            description="Play macOS sounds for the selected activity transitions."
             checked={snapshot.settings.soundNotifications}
             onChange={(soundNotifications) =>
               controller.updateSettings({ soundNotifications })
             }
           />
+          {snapshot.settings.soundNotifications ? (
+            <SoundTriggerPicker
+              value={snapshot.settings.soundTriggers}
+              onChange={(soundTriggers) => controller.updateSettings({ soundTriggers })}
+            />
+          ) : null}
           <div className="setting-row setting-action-row">
             <label id="test-notification-sound-label">
               <strong>Sound check</strong>
-              <small>Play the same alert QPet uses for attention requests.</small>
+              <small>Preview the distinct attention and completion sounds.</small>
             </label>
-            <button
-              className="quiet-button"
-              type="button"
-              disabled={busy === 'sound'}
-              aria-labelledby="test-notification-sound-label"
-              onClick={() => {
-                setBusy('sound')
-                void window.qpet.playTestSound().finally(() => setBusy(undefined))
-              }}
-            >
-              <Icon name="bell" />
-              {busy === 'sound' ? 'Playing…' : 'Test sound'}
-            </button>
+            <div className="sound-test-actions" aria-labelledby="test-notification-sound-label">
+              <button
+                className="quiet-button"
+                type="button"
+                disabled={busy?.startsWith('sound')}
+                onClick={() => {
+                  setBusy('sound-alert')
+                  void window.qpet.playTestSound('needs_input').finally(() => setBusy(undefined))
+                }}
+              >
+                <Icon name="bell" />
+                {busy === 'sound-alert' ? 'Playing…' : 'Test alert'}
+              </button>
+              <button
+                className="quiet-button"
+                type="button"
+                disabled={busy?.startsWith('sound')}
+                onClick={() => {
+                  setBusy('sound-ready')
+                  void window.qpet.playTestSound('ready').finally(() => setBusy(undefined))
+                }}
+              >
+                <Icon name="check" />
+                {busy === 'sound-ready' ? 'Playing…' : 'Test ready'}
+              </button>
+            </div>
           </div>
           <SettingToggle
             title="Show floating pet"
@@ -217,9 +251,9 @@ export function Settings({
             onChange={(petVisible) => controller.updateSettings({ petVisible })}
           />
         </div>
-      </section>
+      </section> : null}
 
-      <section className="settings-section" aria-labelledby="integrations-heading">
+      {activeTab === 'integrations' ? <section className="settings-section" aria-labelledby="integrations-heading">
         <div className="settings-section-title with-action">
           <span>
             <h2 id="integrations-heading">Integrations</h2>
@@ -285,7 +319,80 @@ export function Settings({
             </button>
           ) : null}
         </div>
-      </section>
+      </section> : null}
+
+      {activeTab === 'dictation' ? (
+        <section className="settings-section dictation-section" aria-labelledby="dictation-heading">
+          <div className="settings-section-title">
+            <span>
+              <h2 id="dictation-heading">Dictation <em className="beta-label">Beta</em></h2>
+              <p>Speak from anywhere, review the transcription, then copy it when ready.</p>
+            </span>
+          </div>
+          <div className="settings-group">
+            <SettingToggle
+              title="Enable Dictation Beta"
+              description="Register the global Control + Option + Space shortcut. Off by default."
+              checked={snapshot.settings.dictationEnabled}
+              onChange={(dictationEnabled) => controller.updateSettings({ dictationEnabled })}
+            />
+            {snapshot.settings.dictationEnabled ? (
+              <>
+                <div className="setting-row dictation-info-row">
+                  <span><strong>Shortcut</strong><small>Press once to listen and again to stop.</small></span>
+                  <kbd>⌃ ⌥ Space</kbd>
+                </div>
+                <div className="setting-row dictation-info-row">
+                  <span><strong>Language</strong><small>Uses your current macOS language.</small></span>
+                  <em>System default</em>
+                </div>
+                <div className="setting-row dictation-info-row">
+                  <span><strong>Clipboard</strong><small>Review the final transcription before copying.</small></span>
+                  <em>Confirm first</em>
+                </div>
+                <SettingToggle
+                  title="Start and copied sounds"
+                  description="Play quiet cues when listening starts and text is copied."
+                  checked={snapshot.settings.dictationSounds}
+                  onChange={(dictationSounds) => controller.updateSettings({ dictationSounds })}
+                />
+                <div className="setting-row setting-action-row dictation-test-row">
+                  <label id="dictation-test-label">
+                    <strong>Test microphone</strong>
+                    <small>{snapshot.dictation.message ?? 'Audio and transcription are never saved by QPet.'}</small>
+                  </label>
+                  <button
+                    className="quiet-button"
+                    type="button"
+                    aria-label={snapshot.dictation.state === 'listening'
+                      ? 'Stop and review dictation'
+                      : snapshot.dictation.state === 'transcribing'
+                        ? 'Dictation is transcribing'
+                        : snapshot.dictation.state === 'reviewing'
+                          ? 'Review transcription'
+                        : 'Start listening'}
+                    disabled={snapshot.dictation.state === 'transcribing' || snapshot.dictation.state === 'reviewing'}
+                    onClick={() => void window.qpet.toggleDictation()}
+                  >
+                    <Icon name={snapshot.dictation.state === 'listening' ? 'check' : 'terminal'} />
+                    {snapshot.dictation.state === 'listening'
+                      ? 'Stop & review'
+                      : snapshot.dictation.state === 'transcribing'
+                        ? 'Transcribing…'
+                        : snapshot.dictation.state === 'reviewing'
+                          ? 'Review ready'
+                        : 'Start listening'}
+                  </button>
+                </div>
+              </>
+            ) : null}
+          </div>
+          <div className="dictation-privacy-note">
+            <Icon name="check" />
+            <span><strong>Private by default</strong> QPet does not persist audio or transcriptions. Apple Speech Recognition may use Apple services depending on system support.</span>
+          </div>
+        </section>
+      ) : null}
 
       <section className="privacy-card" aria-label="Privacy">
         <span><Icon name="check" /></span>
@@ -301,6 +408,61 @@ export function Settings({
         <button type="button" onClick={() => void window.qpet.quit()}>Quit QPet</button>
       </footer>
     </main>
+  )
+}
+
+const SOUND_TRIGGER_OPTIONS: ReadonlyArray<{
+  value: SoundTrigger
+  label: string
+}> = [
+  { value: 'needs_input', label: 'Needs input' },
+  { value: 'blocked', label: 'Blocked' },
+  { value: 'ready', label: 'Ready' }
+]
+
+function SoundTriggerPicker({
+  value,
+  onChange
+}: {
+  value: SoundTrigger[]
+  onChange(value: SoundTrigger[]): Promise<AppSettings>
+}): React.JSX.Element {
+  const [busy, setBusy] = useState(false)
+  return (
+    <div className="setting-row sound-trigger-setting">
+      <span>
+        <strong>Play sound for</strong>
+        <small>Choose at least one event, or turn sounds off above.</small>
+      </span>
+      <div className="sound-trigger-options" aria-label="Sound trigger events">
+        {SOUND_TRIGGER_OPTIONS.map((option) => {
+          const checked = value.includes(option.value)
+          const lastSelected = checked && value.length === 1
+          return (
+            <button
+              key={option.value}
+              type="button"
+              role="checkbox"
+              aria-checked={checked}
+              disabled={busy || lastSelected}
+              title={lastSelected ? 'Turn off Notification sounds for complete silence.' : undefined}
+              onClick={() => {
+                const next = checked
+                  ? value.filter((trigger) => trigger !== option.value)
+                  : SOUND_TRIGGER_OPTIONS
+                      .map((candidate) => candidate.value)
+                      .filter((trigger) => trigger === option.value || value.includes(trigger))
+                setBusy(true)
+                void onChange(next).finally(() => setBusy(false))
+              }}
+            >
+              <span aria-hidden="true"><Icon name="check" /></span>
+              {option.label}
+            </button>
+          )
+        })}
+      </div>
+    </div>
   )
 }
 

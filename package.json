@@ -8,7 +8,9 @@
   "author": "Quang Nguyen <quangtn@gmail.com>",
   "license": "MIT",
   "scripts": {
+    "predev": "bash scripts/build-dictation-helper.sh",
     "dev": "electron-vite dev",
+    "prebuild": "bash scripts/build-dictation-helper.sh",
     "build": "npm run typecheck && electron-vite build",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
     "test": "vitest run",
@@ -56,13 +58,19 @@
       {
         "from": "resources/qpet-hook.sh",
         "to": "qpet-hook.sh"
+      },
+      {
+        "from": ".build/qpet-dictation-helper",
+        "to": "qpet-dictation-helper"
       }
     ],
     "mac": {
       "icon": "assets/pet/glasses-pet-master.png",
       "category": "public.app-category.developer-tools",
       "extendInfo": {
-        "LSUIElement": true
+        "LSUIElement": true,
+        "NSMicrophoneUsageDescription": "QPet Dictation Beta listens only while you activate its shortcut.",
+        "NSSpeechRecognitionUsageDescription": "QPet Dictation Beta converts your speech to text and copies the final result."
       },
       "target": [
         "dir",

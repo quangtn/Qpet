@@ -15,8 +15,7 @@ module.exports = async function removeUnusedMacPermissions(context) {
     'NSAudioCaptureUsageDescription',
     'NSBluetoothAlwaysUsageDescription',
     'NSBluetoothPeripheralUsageDescription',
-    'NSCameraUsageDescription',
-    'NSMicrophoneUsageDescription'
+    'NSCameraUsageDescription'
   ]
 
   for (const key of unusedKeys) {
@@ -29,4 +28,3 @@ module.exports = async function removeUnusedMacPermissions(context) {
     }
   }
 }
-

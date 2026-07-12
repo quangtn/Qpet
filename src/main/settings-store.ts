@@ -1,12 +1,21 @@
 import { promises as fs } from 'node:fs'
 import { randomBytes } from 'node:crypto'
 import { dirname, join } from 'node:path'
-import type { AppSettings } from '@shared'
+import type { AppSettings, SoundTrigger } from '@shared'
+
+export const DEFAULT_SOUND_TRIGGERS: readonly SoundTrigger[] = [
+  'needs_input',
+  'blocked',
+  'ready'
+]
 
 const DEFAULT_SETTINGS: AppSettings = {
   launchAtLogin: true,
   systemNotifications: true,
   soundNotifications: true,
+  soundTriggers: [...DEFAULT_SOUND_TRIGGERS],
+  dictationEnabled: false,
+  dictationSounds: true,
   petVisible: true,
   petTheme: 'classic'
 }
@@ -21,13 +30,24 @@ export class SettingsStore {
   }
 
   async initialize(): Promise<AppSettings> {
+    let persistMigration = false
     try {
       const raw = await fs.readFile(this.filePath, 'utf8')
       const parsed = JSON.parse(raw) as Partial<AppSettings>
       this.settings = this.normalize({ ...DEFAULT_SETTINGS, ...parsed })
+      persistMigration = JSON.stringify(parsed.soundTriggers) !==
+        JSON.stringify(this.settings.soundTriggers)
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
         console.warn('Unable to load QPet settings; defaults will be used.', error)
+      }
+    }
+
+    if (persistMigration) {
+      try {
+        await this.persist()
+      } catch (error) {
+        console.warn('Unable to persist migrated QPet sound settings.', error)
       }
     }
 
@@ -57,6 +77,9 @@ export class SettingsStore {
       launchAtLogin: candidate.launchAtLogin !== false,
       systemNotifications: candidate.systemNotifications !== false,
       soundNotifications: candidate.soundNotifications !== false,
+      soundTriggers: normalizeSoundTriggers(candidate.soundTriggers),
+      dictationEnabled: candidate.dictationEnabled === true,
+      dictationSounds: candidate.dictationSounds !== false,
       petVisible: candidate.petVisible !== false,
       petTheme: candidate.petTheme === 'qmini' ? 'qmini' : 'classic',
       ...(petPosition && Number.isFinite(petPosition.x) && Number.isFinite(petPosition.y)
@@ -79,4 +102,13 @@ export class SettingsStore {
       throw error
     }
   }
+}
+
+export function normalizeSoundTriggers(value: unknown): SoundTrigger[] {
+  if (!Array.isArray(value)) return [...DEFAULT_SOUND_TRIGGERS]
+  const selected = new Set(value.filter((item): item is SoundTrigger =>
+    item === 'needs_input' || item === 'blocked' || item === 'ready'
+  ))
+  const normalized = DEFAULT_SOUND_TRIGGERS.filter((trigger) => selected.has(trigger))
+  return normalized.length > 0 ? normalized : [...DEFAULT_SOUND_TRIGGERS]
 }

@@ -3,9 +3,12 @@ import { ZodError } from 'zod'
 
 import {
   parseActivityId,
+  parseDictationAction,
+  parseDictationText,
   parseProvider,
   parseScreenPoint,
   parseSessionAction,
+  parseSoundTrigger,
   parseSettingsPatch
 } from '../src/main/ipc-schemas'
 
@@ -31,6 +34,10 @@ describe('IPC input schemas', () => {
     })
     expect(() => parseSettingsPatch({ petTheme: 'neon' })).toThrow(ZodError)
     expect(() => parseSettingsPatch({ unknown: true })).toThrow(ZodError)
+    expect(parseSettingsPatch({ soundTriggers: ['blocked', 'ready'] })).toEqual({
+      soundTriggers: ['blocked', 'ready']
+    })
+    expect(() => parseSettingsPatch({ soundTriggers: ['working'] })).toThrow(ZodError)
   })
 
   it('parses screen points within bounds', () => {
@@ -42,5 +49,17 @@ describe('IPC input schemas', () => {
   it('parses providers', () => {
     expect(parseProvider('cursor')).toBe('cursor')
     expect(() => parseProvider('windsurf')).toThrow(ZodError)
+  })
+
+  it('parses only supported test-sound triggers', () => {
+    expect(parseSoundTrigger('ready')).toBe('ready')
+    expect(() => parseSoundTrigger('running')).toThrow(ZodError)
+  })
+
+  it('validates narrow dictation actions and edited text', () => {
+    expect(parseDictationAction('copy')).toBe('copy')
+    expect(parseDictationText('Edited transcription')).toBe('Edited transcription')
+    expect(() => parseDictationAction('paste')).toThrow(ZodError)
+    expect(() => parseDictationText('x'.repeat(64 * 1024 + 1))).toThrow(ZodError)
   })
 })

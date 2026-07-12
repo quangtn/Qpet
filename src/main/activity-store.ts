@@ -14,7 +14,8 @@ import {
 } from './provider-normalizers'
 
 export const CODEX_STALE_AFTER_MS = 24 * 60 * 60 * 1_000
-export const CURSOR_STALE_AFTER_MS = 2 * 60 * 60 * 1_000
+export const CURSOR_STALE_AFTER_MS = 5 * 60 * 1_000
+export const CLAUDE_IDLE_AFTER_MS = 5 * 60 * 1_000
 export const ACTIVITY_RETENTION_MS = 7 * 24 * 60 * 60 * 1_000
 export const PERMISSION_DEDUPE_WINDOW_MS = 5_000
 export const ACTIVITY_FILE_NAME = 'activities.json'
@@ -32,6 +33,7 @@ export interface ActivityStoreOptions {
   now?: () => number
   codexStaleAfterMs?: number
   cursorStaleAfterMs?: number
+  claudeIdleAfterMs?: number
   retentionMs?: number
   dedupeWindowMs?: number
 }
@@ -63,6 +65,7 @@ export class ActivityStore {
   private readonly now: () => number
   private readonly codexStaleAfterMs: number
   private readonly cursorStaleAfterMs: number
+  private readonly claudeIdleAfterMs: number
   private readonly retentionMs: number
   private readonly dedupeWindowMs: number
   private activities = new Map<string, Activity>()
@@ -82,6 +85,7 @@ export class ActivityStore {
     this.now = normalizedOptions.now ?? Date.now
     this.codexStaleAfterMs = normalizedOptions.codexStaleAfterMs ?? CODEX_STALE_AFTER_MS
     this.cursorStaleAfterMs = normalizedOptions.cursorStaleAfterMs ?? CURSOR_STALE_AFTER_MS
+    this.claudeIdleAfterMs = normalizedOptions.claudeIdleAfterMs ?? CLAUDE_IDLE_AFTER_MS
     this.retentionMs = normalizedOptions.retentionMs ?? ACTIVITY_RETENTION_MS
     this.dedupeWindowMs = normalizedOptions.dedupeWindowMs ?? PERMISSION_DEDUPE_WINDOW_MS
   }
@@ -187,7 +191,8 @@ export class ActivityStore {
       for (const observation of observations) {
         const id = activityId('claude', observation.sessionId)
         const previous = nextActivities.get(id)
-        const next = activityFromObservation(observation, previous)
+        const next = activityFromObservation(observation, previous, this.claudeIdleAfterMs)
+        if (!next) continue
         if (previous && equalActivity(previous, next)) continue
 
         nextActivities.set(id, next)
@@ -264,25 +269,30 @@ export class ActivityStore {
   async cleanup(now = this.now()): Promise<number> {
     return this.enqueue(async () => {
       const nextActivities = new Map(this.activities)
-      const removed: string[] = []
+      let changed = 0
 
       for (const [id, activity] of nextActivities) {
+        const settled = settleInactiveCursor(activity, now, this.cursorStaleAfterMs)
+        if (settled !== activity) {
+          nextActivities.set(id, settled)
+          changed += 1
+          continue
+        }
         if (shouldExpire(
           activity,
           now,
           this.codexStaleAfterMs,
-          this.cursorStaleAfterMs,
           this.retentionMs
         )) {
           nextActivities.delete(id)
-          removed.push(id)
+          changed += 1
         }
       }
 
-      if (removed.length === 0) return 0
+      if (changed === 0) return 0
       await this.commit(nextActivities)
       this.emit({ activities: this.getActivities() })
-      return removed.length
+      return changed
     })
   }
 
@@ -312,11 +322,12 @@ export class ActivityStore {
 
     const now = this.now()
     for (const [id, activity] of loaded) {
+      const settled = settleInactiveCursor(activity, now, this.cursorStaleAfterMs)
+      if (settled !== activity) loaded.set(id, settled)
       if (shouldExpire(
-        activity,
+        settled,
         now,
         this.codexStaleAfterMs,
-        this.cursorStaleAfterMs,
         this.retentionMs
       )) loaded.delete(id)
     }
@@ -378,7 +389,6 @@ export function shouldExpire(
   activity: Activity,
   now: number,
   codexStaleAfterMs = CODEX_STALE_AFTER_MS,
-  cursorStaleAfterMs = CURSOR_STALE_AFTER_MS,
   retentionMs = ACTIVITY_RETENTION_MS
 ): boolean {
   const age = Math.max(0, now - activity.updatedAt)
@@ -389,15 +399,33 @@ export function shouldExpire(
     return age >= codexStaleAfterMs
   }
 
-  if (activity.provider === 'cursor' && activity.state === 'running') {
-    return age >= cursorStaleAfterMs
-  }
-
   if (activity.state === 'ready' || activity.state === 'blocked') {
     return age >= retentionMs
   }
 
   return false
+}
+
+function settleInactiveCursor(
+  activity: Activity,
+  now: number,
+  inactiveAfterMs: number
+): Activity {
+  if (
+    activity.provider !== 'cursor' ||
+    activity.state !== 'running' ||
+    Math.max(0, now - activity.updatedAt) < inactiveAfterMs
+  ) {
+    return activity
+  }
+  return toPersistedActivity({
+    ...activity,
+    state: 'ready',
+    summary: 'Cursor session inactive',
+    updatedAt: now,
+    unread: true,
+    live: false
+  })
 }
 
 export async function writeActivitiesAtomically(
@@ -472,10 +500,22 @@ function closeActivity(
 
 function activityFromObservation(
   observation: ClaudeAgentObservation,
-  previous: Activity | undefined
-): Activity {
-  const state = observation.state ?? previous?.state ?? 'running'
-  const summary = observation.summary ?? previous?.summary ?? 'Claude session active'
+  previous: Activity | undefined,
+  idleAfterMs: number
+): Activity | undefined {
+  // A foreground entry in `claude agents --json` proves only that the process
+  // is alive. Hooks remain the source of truth for whether it is actively
+  // working, waiting, or finished.
+  if (!previous && observation.state === undefined) return undefined
+
+  const quietLiveSession =
+    previous?.state === 'running' &&
+    observation.state === undefined &&
+    observation.observedAt - previous.updatedAt >= idleAfterMs
+  const state = quietLiveSession ? 'ready' : (observation.state ?? previous?.state ?? 'running')
+  const summary = quietLiveSession
+    ? 'Claude session idle'
+    : (observation.summary ?? previous?.summary ?? 'Claude session active')
   const stateChanged = previous ? state !== previous.state || summary !== previous.summary : true
 
   return toPersistedActivity({
@@ -487,8 +527,9 @@ function activityFromObservation(
     state,
     summary,
     updatedAt: stateChanged ? observation.observedAt : (previous?.updatedAt ?? observation.observedAt),
-    unread:
-      observation.state && stateChanged
+    unread: quietLiveSession
+      ? false
+      : observation.state && stateChanged
         ? observation.state !== 'running'
         : (previous?.unread ?? false),
     live: observation.live,

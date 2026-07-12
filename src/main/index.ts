@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url'
 import type {
   AppSettings,
   AppSnapshot,
+  DictationStatus,
   IntegrationStatus,
   Provider,
   SessionActionRequest
@@ -17,6 +18,7 @@ import {
 } from './binary-discovery'
 import { ClaudePoller } from './claude-poller'
 import { EventServer } from './event-server'
+import { DictationManager } from './dictation-manager'
 import { IntegrationManager } from './integration-manager'
 import { registerIpcHandlers } from './ipc-handlers'
 import { NotificationManager, playMacNotificationSound } from './notification-manager'
@@ -27,7 +29,7 @@ import { SettingsStore } from './settings-store'
 import { WindowManager } from './window-manager'
 
 const MODULE_DIRECTORY = dirname(fileURLToPath(import.meta.url))
-const CLEANUP_INTERVAL_MS = 60 * 60 * 1_000
+const CLEANUP_INTERVAL_MS = 60 * 1_000
 
 app.setName('QPet')
 if (process.platform === 'darwin') app.setActivationPolicy('accessory')
@@ -44,6 +46,7 @@ let claudePollerSyncQueue: Promise<void> = Promise.resolve()
 let cleanupTimer: NodeJS.Timeout | undefined
 let removeIpcHandlers: (() => void) | undefined
 let recoveryTray: RecoveryTray | undefined
+let dictationManager: DictationManager | undefined
 let isShuttingDown = false
 
 function unavailableStatus(listenerActive = false, listenerMessage?: string): IntegrationStatus {
@@ -81,6 +84,10 @@ async function bootstrap(): Promise<void> {
 
   let integrationManager: IntegrationManager | undefined
   let integrationStatus = unavailableStatus()
+  let dictationStatus: DictationStatus = {
+    state: 'idle',
+    shortcut: 'Control+Option+Space'
+  }
   let binaries: Partial<Record<Provider, DiscoveredBinary>> = {}
   let listenerError: string | undefined
 
@@ -136,6 +143,7 @@ async function bootstrap(): Promise<void> {
     activities: activityStore.getActivities(),
     integrations: integrationStatus,
     settings: settingsStore.get(),
+    dictation: dictationStatus,
     appVersion: app.getVersion()
   })
 
@@ -144,7 +152,12 @@ async function bootstrap(): Promise<void> {
       process.env.QPET_TEST_MODE !== '1' &&
       settingsStore.get().systemNotifications,
     () => windowManager?.toggleTray(),
-    () => process.env.QPET_TEST_MODE !== '1' && settingsStore.get().soundNotifications
+    () => {
+      const settings = settingsStore.get()
+      return process.env.QPET_TEST_MODE !== '1' && settings.soundNotifications
+        ? settings.soundTriggers
+        : []
+    }
   )
   notificationManager.handle(activityStore.getActivities())
 
@@ -159,6 +172,26 @@ async function bootstrap(): Promise<void> {
     }
   })
   windowManager.create()
+
+  const dictationHelperPath = app.isPackaged
+    ? join(process.resourcesPath, 'qpet-dictation-helper')
+    : join(app.getAppPath(), '.build', 'qpet-dictation-helper')
+  dictationManager = new DictationManager({
+    helperPath: dictationHelperPath,
+    getSettings: () => settingsStore.get(),
+    onStatus: (status) => {
+      dictationStatus = status
+      publish()
+      windowManager?.setDictationPreviewVisible(
+        status.state === 'listening' ||
+          status.state === 'transcribing' ||
+          status.state === 'reviewing' ||
+          status.state === 'error',
+        status.state === 'reviewing' || status.state === 'error'
+      )
+    }
+  })
+  if (process.env.QPET_TEST_MODE !== '1') dictationManager.configure()
 
   activityStore.subscribe(() => publish())
 
@@ -175,6 +208,12 @@ async function bootstrap(): Promise<void> {
     if (patch.petVisible !== undefined) {
       windowManager?.setPetVisible(settings.petVisible)
       syncRecoveryTray(settings.petVisible)
+    }
+    if (
+      process.env.QPET_TEST_MODE !== '1' &&
+      (patch.dictationEnabled !== undefined || patch.dictationSounds !== undefined)
+    ) {
+      dictationManager?.configure()
     }
     publish()
     return settings
@@ -264,7 +303,9 @@ async function bootstrap(): Promise<void> {
     movePetDrag: (point) => windowManager?.movePetDrag(point),
     endPetDrag: () => windowManager?.endPetDrag(),
     openProviderApp,
-    playTestSound: () => playMacNotificationSound(),
+    playTestSound: (trigger) => playMacNotificationSound(trigger),
+    toggleDictation: () => dictationManager?.toggle(),
+    performDictationAction: (action, text) => dictationManager?.performAction(action, text),
     toggleTray: () => windowManager?.toggleTray(),
     hideTray: () => windowManager?.hideTray(),
     showSettings: () => windowManager?.showSettings(),
@@ -308,6 +349,8 @@ async function bootstrap(): Promise<void> {
     if (cleanupTimer) clearInterval(cleanupTimer)
     recoveryTray?.destroy()
     recoveryTray = undefined
+    dictationManager?.destroy()
+    dictationManager = undefined
     removeIpcHandlers?.()
     Promise.allSettled([
       syncClaudePoller(),

@@ -13,6 +13,8 @@ export const IPC = {
   petDragEnd: 'qpet:pet:drag-end',
   providerAppOpen: 'qpet:provider-app:open',
   soundPlayTest: 'qpet:sound:play-test',
+  dictationToggle: 'qpet:dictation:toggle',
+  dictationAction: 'qpet:dictation:action',
   trayToggle: 'qpet:tray:toggle',
   trayHide: 'qpet:tray:hide',
   settingsShow: 'qpet:settings:show',

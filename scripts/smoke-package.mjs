@@ -1,6 +1,6 @@
 import { _electron as electron } from 'playwright'
 import { execFileSync } from 'node:child_process'
-import { mkdtemp, mkdir, readFile, rm } from 'node:fs/promises'
+import { access, mkdtemp, mkdir, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 
@@ -20,6 +20,15 @@ const lsUiElement = execFileSync(
 if (lsUiElement !== 'true') {
   throw new Error(`Packaged QPet must set LSUIElement=true; received ${lsUiElement || 'empty'}`)
 }
+for (const key of ['NSMicrophoneUsageDescription', 'NSSpeechRecognitionUsageDescription']) {
+  const description = execFileSync(
+    '/usr/libexec/PlistBuddy',
+    ['-c', `Print :${key}`, infoPlist],
+    { encoding: 'utf8' }
+  ).trim()
+  if (!description) throw new Error(`Packaged QPet is missing ${key}`)
+}
+await access(join(dirname(dirname(executablePath)), 'Resources', 'qpet-dictation-helper'))
 
 const retry = async (operation, timeoutMs = 10_000) => {
   const deadline = Date.now() + timeoutMs
@@ -109,7 +118,7 @@ try {
   }
 
   process.stdout.write(
-    `Packaged QPet smoke test passed (LSUIElement enabled, sprite width ${imageWidth}px, authenticated event received).\n`
+    `Packaged QPet smoke test passed (LSUIElement and Dictation helper enabled, sprite width ${imageWidth}px, authenticated event received).\n`
   )
 } finally {
   await app.close()

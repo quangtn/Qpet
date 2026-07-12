@@ -55,6 +55,13 @@ else
   overall=1
 fi
 
+if [[ -x /usr/bin/xcrun ]] && /usr/bin/xcrun --find swiftc >/dev/null 2>&1; then
+  print_result "Swift compiler" "OK" "$(/usr/bin/xcrun --find swiftc)"
+else
+  print_result "Swift compiler" "ERROR" "Install Xcode Command Line Tools with: xcode-select --install"
+  overall=1
+fi
+
 for provider in codex claude cursor; do
   if provider_path="$(command -v "$provider" 2>/dev/null)"; then
     print_result "$provider CLI" "FOUND" "$provider_path"

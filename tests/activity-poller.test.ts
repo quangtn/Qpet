@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 
 import {
+  CLAUDE_RECONCILE_GRACE_MS,
   ClaudePoller,
   parseClaudeAgentOutput,
   type ClaudeCommandRunner
@@ -84,6 +85,36 @@ describe('ClaudePoller', () => {
       { ids: ['session-1'], missing: [] },
       { ids: [], missing: ['session-1'] }
     ])
+  })
+
+  it('closes older hook-only Claude sessions missing from an authoritative poll', async () => {
+    const reconcileClaudeAgents = vi.fn(async () => undefined)
+    const poller = new ClaudePoller({
+      binaryPath: '/absolute/claude',
+      now: () => CLAUDE_RECONCILE_GRACE_MS,
+      runCommand: async () => ({ stdout: '[]' }),
+      activityStore: {
+        getActivities: () => [{
+          id: 'claude:hook-only',
+          provider: 'claude',
+          sessionId: 'hook-only',
+          cwd: '/tmp/project',
+          projectName: 'project',
+          state: 'running',
+          summary: 'Claude is working',
+          updatedAt: 0,
+          unread: false,
+          live: true
+        }],
+        reconcileClaudeAgents
+      }
+    })
+
+    await expect(poller.pollNow()).resolves.toMatchObject({
+      ok: true,
+      missingSessionIds: ['hook-only']
+    })
+    expect(reconcileClaudeAgents).toHaveBeenCalledWith([], ['hook-only'])
   })
 
   it('requires the capability-tested absolute Claude binary path', () => {

@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import {
   ACTIVITY_RETENTION_MS,
   ActivityStore,
+  CLAUDE_IDLE_AFTER_MS,
   CODEX_STALE_AFTER_MS,
   CURSOR_STALE_AFTER_MS
 } from '../src/main/activity-store'
@@ -141,6 +142,82 @@ describe('ActivityStore', () => {
     expect(store.getActivities()[0]).toMatchObject({ state: 'ready', live: false })
   })
 
+  it('does not claim an unknown presence-only Claude session is working', async () => {
+    const { store } = await makeStore(() => 1)
+
+    expect(
+      await store.reconcileClaudeAgents([
+        {
+          provider: 'claude',
+          sessionId: 'presence-only',
+          cwd: '/tmp/project',
+          projectName: 'project',
+          live: true,
+          observedAt: 20
+        }
+      ])
+    ).toEqual([])
+    expect(store.getActivities()).toEqual([])
+  })
+
+  it('settles quiet live Claude work as idle without claiming the session ended', async () => {
+    let now = 0
+    const { store } = await makeStore(() => now)
+    await store.ingest('claude', {
+      session_id: 'session-1',
+      cwd: '/tmp/project',
+      hook_event_name: 'UserPromptSubmit'
+    })
+
+    await store.reconcileClaudeAgents([
+      {
+        provider: 'claude',
+        sessionId: 'session-1',
+        cwd: '/tmp/project',
+        projectName: 'project',
+        live: true,
+        observedAt: CLAUDE_IDLE_AFTER_MS - 1
+      }
+    ])
+    expect(store.getActivities()[0]).toMatchObject({
+      state: 'running',
+      summary: 'Claude is working',
+      updatedAt: 0,
+      live: true
+    })
+
+    await store.reconcileClaudeAgents([
+      {
+        provider: 'claude',
+        sessionId: 'session-1',
+        cwd: '/tmp/project',
+        projectName: 'project',
+        live: true,
+        observedAt: CLAUDE_IDLE_AFTER_MS
+      }
+    ])
+    expect(store.getActivities()[0]).toMatchObject({
+      state: 'ready',
+      summary: 'Claude session idle',
+      updatedAt: CLAUDE_IDLE_AFTER_MS,
+      unread: false,
+      live: true
+    })
+
+    now = CLAUDE_IDLE_AFTER_MS + 1
+    await store.ingest('claude', {
+      session_id: 'session-1',
+      cwd: '/tmp/project',
+      hook_event_name: 'UserPromptSubmit'
+    })
+    expect(store.getActivities()[0]).toMatchObject({
+      state: 'running',
+      summary: 'Claude is working',
+      updatedAt: CLAUDE_IDLE_AFTER_MS + 1,
+      live: true
+    })
+  })
+
   it('expires stale Codex work after 24 hours and completed history after seven days', async () => {
     let now = 0
     const { store } = await makeStore(() => now)
@@ -164,7 +241,7 @@ describe('ActivityStore', () => {
     expect(store.getActivities()).toEqual([])
   })
 
-  it('expires orphaned Cursor work after two hours without lifecycle updates', async () => {
+  it('settles orphaned Cursor work after five minutes without lifecycle updates', async () => {
     let now = 0
     const { store } = await makeStore(() => now)
     await store.ingest('cursor', {
@@ -176,7 +253,13 @@ describe('ActivityStore', () => {
 
     now = CURSOR_STALE_AFTER_MS
     expect(await store.cleanup()).toBe(1)
-    expect(store.getActivities()).toEqual([])
+    expect(store.getActivities()).toHaveLength(1)
+    expect(store.getActivities()[0]).toMatchObject({
+      state: 'ready',
+      summary: 'Cursor session inactive',
+      live: false,
+      unread: true
+    })
   })
 
   it('marks all ready activities read when no id is supplied', async () => {

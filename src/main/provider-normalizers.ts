@@ -364,17 +364,13 @@ function readIdentity(
   provider: Provider,
   input: Record<string, unknown>
 ): Pick<Activity, 'id' | 'provider' | 'sessionId' | 'cwd' | 'projectName'> | null {
+  const sessionKeys = provider === 'cursor'
+    ? ['conversation_id', 'conversationId']
+    : provider === 'codex'
+      ? ['session_id', 'sessionId', 'thread_id', 'threadId', 'thread-id', 'session-id']
+      : ['session_id', 'sessionId', 'session-id']
   const sessionId = cleanString(
-    readString(input, [
-      'session_id',
-      'sessionId',
-      'thread_id',
-      'threadId',
-      'thread-id',
-      'session-id',
-      'conversation_id',
-      'conversationId'
-    ]),
+    readString(input, sessionKeys),
     MAX_SESSION_ID_LENGTH
   )
   const cwd = cleanString(readWorkingDirectory(input), MAX_PATH_LENGTH)

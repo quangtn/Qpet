@@ -2,6 +2,17 @@ export type Provider = 'codex' | 'claude' | 'cursor'
 
 export type PetState = 'running' | 'needs_input' | 'ready' | 'blocked'
 export type PetTheme = 'classic' | 'qmini'
+export type SoundTrigger = 'needs_input' | 'blocked' | 'ready'
+export type DictationState = 'idle' | 'listening' | 'transcribing' | 'reviewing' | 'copied' | 'error'
+export type DictationAction = 'copy' | 'retry' | 'cancel'
+
+export interface DictationStatus {
+  state: DictationState
+  shortcut: string
+  message?: string
+  /** Transient renderer-only preview. Never persisted. */
+  preview?: string
+}
 
 export type IntegrationHealth =
   | 'not_installed'
@@ -46,6 +57,9 @@ export interface AppSettings {
   launchAtLogin: boolean
   systemNotifications: boolean
   soundNotifications: boolean
+  soundTriggers: SoundTrigger[]
+  dictationEnabled: boolean
+  dictationSounds: boolean
   petVisible: boolean
   petTheme: PetTheme
   petPosition?: { x: number; y: number }
@@ -60,6 +74,7 @@ export interface AppSnapshot {
   activities: Activity[]
   integrations: IntegrationStatus
   settings: AppSettings
+  dictation: DictationStatus
   appVersion: string
 }
 
@@ -92,7 +107,9 @@ export interface QPetApi {
   movePetDrag(point: ScreenPoint): Promise<void>
   endPetDrag(): Promise<void>
   openProviderApp(provider: Provider): Promise<ActionResult>
-  playTestSound(): Promise<void>
+  playTestSound(trigger: SoundTrigger): Promise<void>
+  toggleDictation(): Promise<void>
+  performDictationAction(action: DictationAction, text?: string): Promise<void>
   toggleTray(): Promise<void>
   showSettings(): Promise<void>
   hideTray(): Promise<void>

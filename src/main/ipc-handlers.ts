@@ -3,26 +3,34 @@ import type {
   ActionResult,
   AppSettings,
   AppSnapshot,
+  DictationAction,
   InstallResult,
   IntegrationStatus,
   Provider,
   ScreenPoint,
-  SessionActionRequest
+  SessionActionRequest,
+  SoundTrigger
 } from '@shared'
 import { IPC } from '@shared'
 import {
   parseActivityId,
+  parseDictationAction,
+  parseDictationText,
   parseProvider,
   parseScreenPoint,
   parseSessionAction,
+  parseSoundTrigger,
   parseSettingsPatch
 } from './ipc-schemas'
 
 export {
   parseActivityId,
+  parseDictationAction,
+  parseDictationText,
   parseProvider,
   parseScreenPoint,
   parseSessionAction,
+  parseSoundTrigger,
   parseSettingsPatch
 } from './ipc-schemas'
 
@@ -39,7 +47,9 @@ export interface IpcHandlerDependencies {
   movePetDrag(point: ScreenPoint): void
   endPetDrag(): void
   openProviderApp(provider: Provider): Promise<ActionResult>
-  playTestSound(): void
+  playTestSound(trigger: SoundTrigger): void
+  toggleDictation(): void
+  performDictationAction(action: DictationAction, text?: string): void
   toggleTray(): void
   hideTray(): void
   showSettings(): void
@@ -69,7 +79,14 @@ export function registerIpcHandlers(dependencies: IpcHandlerDependencies): () =>
     [IPC.petDragEnd, () => dependencies.endPetDrag()],
     [IPC.providerAppOpen, (_event, rawProvider) =>
       dependencies.openProviderApp(parseProvider(rawProvider))],
-    [IPC.soundPlayTest, () => dependencies.playTestSound()],
+    [IPC.soundPlayTest, (_event, rawTrigger) =>
+      dependencies.playTestSound(parseSoundTrigger(rawTrigger))],
+    [IPC.dictationToggle, () => dependencies.toggleDictation()],
+    [IPC.dictationAction, (_event, rawAction, rawText) => {
+      const action = parseDictationAction(rawAction)
+      const text = action === 'copy' ? parseDictationText(rawText) : undefined
+      return dependencies.performDictationAction(action, text)
+    }],
     [IPC.trayToggle, () => dependencies.toggleTray()],
     [IPC.trayHide, () => dependencies.hideTray()],
     [IPC.settingsShow, () => dependencies.showSettings()],

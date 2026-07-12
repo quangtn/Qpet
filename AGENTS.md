@@ -39,3 +39,12 @@ Use `npm run install:mac` for a source install. The script builds and installs
 the app only. It must not edit `~/.codex`, `~/.claude`, or `~/.cursor`;
 integration setup is performed interactively inside QPet so the user can
 review and trust it.
+
+## Learned User Preferences
+
+- Prefer git commit messages without Cursor/agent `Co-authored-by` trailers on this personal public repo.
+
+## Learned Workspace Facts
+
+- Canonical remote is the personal GitHub repo `quangtn/qpet` (https://github.com/quangtn/qpet).
+- Pet visual customization for contributors and designers is documented in `docs/DESIGNER.md`; Classic assets live in `assets/pet/`, Qmini in `assets/pets/qmini/`, and theme mapping in `src/renderer/src/pet-themes.ts`.

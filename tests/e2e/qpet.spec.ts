@@ -15,11 +15,13 @@ const PRELOAD_ALLOWLIST = [
   'movePetDrag',
   'onSnapshot',
   'openProviderApp',
+  'performDictationAction',
   'performSessionAction',
   'playTestSound',
   'quit',
   'refreshIntegrations',
   'showSettings',
+  'toggleDictation',
   'toggleTray',
   'uninstallIntegrations',
   'updateSettings'
@@ -74,7 +76,9 @@ test('normalizes provider events and prioritizes the floating pet activity tray'
   try {
     const pet = await pageFor(electronApp, 'pet')
     const tray = await pageFor(electronApp, 'tray')
+    const dictation = await pageFor(electronApp, 'dictation')
     await expect(pet.getByTestId('pet')).toHaveAttribute('data-state', 'sleeping')
+    await expect(dictation.getByTestId('dictation-preview')).toBeAttached()
     await expect(pet.getByTestId('provider-status-codex')).toHaveCount(0)
     await expect(pet.getByTestId('provider-status-claude')).toHaveCount(0)
     const petWindowBehavior = await electronApp.evaluate(({ app, BrowserWindow }) => {
@@ -103,6 +107,93 @@ test('normalizes provider events and prioritizes the floating pet activity tray'
       return window.getBounds()
     })
     expect(petBounds).toMatchObject({ width: 190, height: 112 })
+    const dictationWindowBehavior = await electronApp.evaluate(({ BrowserWindow }) => {
+      const window = BrowserWindow.getAllWindows().find((candidate) => {
+        const url = new URL(candidate.webContents.getURL())
+        return url.searchParams.get('window') === 'dictation'
+      })
+      if (!window) throw new Error('Dictation preview window is missing')
+      return {
+        bounds: window.getBounds(),
+        visible: window.isVisible(),
+        alwaysOnTop: window.isAlwaysOnTop(),
+        visibleOnAllWorkspaces: window.isVisibleOnAllWorkspaces()
+      }
+    })
+    expect(dictationWindowBehavior).toMatchObject({
+      bounds: { width: 380, height: 220 },
+      visible: false,
+      alwaysOnTop: true,
+      visibleOnAllWorkspaces: true
+    })
+    const initialSnapshot = await dictation.evaluate(() =>
+      (globalThis as unknown as { qpet: QPetApi }).qpet.getSnapshot()
+    )
+    await electronApp.evaluate(({ BrowserWindow }, snapshot) => {
+      const window = BrowserWindow.getAllWindows().find((candidate) => {
+        const url = new URL(candidate.webContents.getURL())
+        return url.searchParams.get('window') === 'dictation'
+      })
+      if (!window) throw new Error('Dictation preview window is missing')
+      window.webContents.send('qpet:snapshot:changed', {
+        ...snapshot,
+        dictation: {
+          state: 'reviewing',
+          shortcut: 'Control+Option+Space',
+          preview: 'Rough transcription'
+        }
+      })
+      window.show()
+    }, initialSnapshot)
+    const transcription = dictation.getByRole('textbox', { name: 'Transcription text' })
+    await expect(transcription).toBeEditable()
+    await transcription.fill('Edited transcription')
+    await expect(transcription).toHaveValue('Edited transcription')
+    await expect(dictation.getByRole('button', { name: 'Copy' })).toBeEnabled()
+    await expect(dictation.getByRole('button', { name: 'Try again' })).toBeVisible()
+    await electronApp.evaluate(({ BrowserWindow }, snapshot) => {
+      const window = BrowserWindow.getAllWindows().find((candidate) => {
+        const url = new URL(candidate.webContents.getURL())
+        return url.searchParams.get('window') === 'dictation'
+      })
+      if (!window) throw new Error('Dictation preview window is missing')
+      window.webContents.send('qpet:snapshot:changed', {
+        ...snapshot,
+        dictation: {
+          state: 'listening',
+          shortcut: 'Control+Option+Space',
+          preview: 'Live partial text'
+        }
+      })
+    }, initialSnapshot)
+    await expect(transcription).not.toBeEditable()
+    await expect(dictation.getByRole('button', { name: 'Stop & review' })).toBeEnabled()
+    await electronApp.evaluate(({ BrowserWindow }, snapshot) => {
+      const window = BrowserWindow.getAllWindows().find((candidate) => {
+        const url = new URL(candidate.webContents.getURL())
+        return url.searchParams.get('window') === 'dictation'
+      })
+      if (!window) throw new Error('Dictation preview window is missing')
+      window.webContents.send('qpet:snapshot:changed', {
+        ...snapshot,
+        dictation: {
+          state: 'error',
+          shortcut: 'Control+Option+Space',
+          message: 'Microphone and Speech Recognition permission are required.'
+        }
+      })
+    }, initialSnapshot)
+    await expect(dictation.getByText('Dictation unavailable')).toBeVisible()
+    await expect(dictation.getByText('Microphone and Speech Recognition permission are required.')).toBeVisible()
+    await expect(dictation.getByRole('alert')).toBeVisible()
+    await expect(dictation.getByRole('button', { name: 'Try again' })).toBeEnabled()
+    await electronApp.evaluate(({ BrowserWindow }) => {
+      const window = BrowserWindow.getAllWindows().find((candidate) => {
+        const url = new URL(candidate.webContents.getURL())
+        return url.searchParams.get('window') === 'dictation'
+      })
+      window?.hide()
+    })
 
     const rendererSurface = await pet.evaluate(() => {
       const globals = globalThis as unknown as Record<string, unknown> & { qpet: QPetApi }
@@ -170,8 +261,27 @@ test('normalizes provider events and prioritizes the floating pet activity tray'
     )
     const settings = await pageFor(electronApp, 'settings')
     await expect(settings.getByTestId('settings-window')).toBeVisible()
-    await expect(settings.locator('.integration-card')).toHaveCount(3)
+    await expect(settings.getByRole('navigation', { name: 'Settings sections' })).toBeVisible()
     await expect(settings.getByRole('radio')).toHaveCount(2)
+    const needsInputSound = settings.getByRole('checkbox', { name: 'Needs input' })
+    const blockedSound = settings.getByRole('checkbox', { name: 'Blocked' })
+    const readySound = settings.getByRole('checkbox', { name: 'Ready' })
+    await expect(needsInputSound).toHaveAttribute('aria-checked', 'true')
+    await expect(blockedSound).toHaveAttribute('aria-checked', 'true')
+    await expect(readySound).toHaveAttribute('aria-checked', 'true')
+    await needsInputSound.click()
+    await blockedSound.click()
+    await expect(readySound).toBeDisabled()
+    const soundSwitch = settings.getByRole('switch', { name: 'Notification sounds' })
+    await soundSwitch.click()
+    await expect(settings.getByRole('checkbox')).toHaveCount(0)
+    await soundSwitch.click()
+    await expect(settings.getByRole('checkbox', { name: 'Ready' })).toHaveAttribute(
+      'aria-checked',
+      'true'
+    )
+    await expect(settings.getByRole('button', { name: 'Test alert' })).toBeVisible()
+    await expect(settings.getByRole('button', { name: 'Test ready' })).toBeVisible()
     await settings.getByRole('radio', { name: /Qmini/ }).click()
     await expect(settings.getByRole('radio', { name: /Qmini/ })).toHaveAttribute(
       'aria-checked',
@@ -189,7 +299,7 @@ test('normalizes provider events and prioritizes the floating pet activity tray'
       'true'
     )
     await expect(pet.getByTestId('pet-window')).toHaveAttribute('data-theme', 'classic')
-    const settingsMetrics = await settings.evaluate(() => {
+    const generalMetrics = await settings.evaluate(() => {
       const pageGlobal = globalThis as unknown as {
         document: { querySelector(selector: string): unknown }
         getComputedStyle(element: unknown): { fontSize: string }
@@ -201,15 +311,24 @@ test('normalizes provider events and prioritizes the floating pet activity tray'
       }
       return {
         sectionTitle: readFontSize('.settings-section-title h2'),
-        settingTitle: readFontSize('.setting-row strong'),
-        integrationTitle: readFontSize('.integration-card-title strong')
+        settingTitle: readFontSize('.setting-row strong')
       }
     })
-    expect(settingsMetrics).toEqual({
+    expect(generalMetrics).toEqual({
       sectionTitle: 15,
-      settingTitle: 13,
-      integrationTitle: 14
+      settingTitle: 13
     })
+    await settings.getByRole('button', { name: /Dictation Beta/ }).click()
+    const dictationSwitch = settings.getByRole('switch', { name: 'Enable Dictation Beta' })
+    await expect(dictationSwitch).toHaveAttribute('aria-checked', 'false')
+    await dictationSwitch.click()
+    await expect(settings.getByText('⌃ ⌥ Space')).toBeVisible()
+    await settings.getByRole('button', { name: 'Integrations' }).click()
+    await expect(settings.locator('.integration-card')).toHaveCount(3)
+    await expect(settings.locator('.integration-card-title strong').first()).toHaveCSS(
+      'font-size',
+      '14px'
+    )
     const settingsBounds = await electronApp.evaluate(({ BrowserWindow }) => {
       const window = BrowserWindow.getAllWindows().find((candidate) => {
         const url = new URL(candidate.webContents.getURL())

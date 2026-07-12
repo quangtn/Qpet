@@ -1,14 +1,17 @@
 import { execFile } from 'node:child_process'
 import { isAbsolute } from 'node:path'
 
+import type { Activity } from '@shared'
 import type { ClaudeAgentObservation } from './provider-normalizers'
 import { normalizeClaudeAgents } from './provider-normalizers'
 
 export const CLAUDE_POLL_INTERVAL_MS = 10_000
 export const CLAUDE_POLL_TIMEOUT_MS = 5_000
+export const CLAUDE_RECONCILE_GRACE_MS = 30_000
 const CLAUDE_POLL_MAX_BUFFER_BYTES = 1024 * 1024
 
 export interface ClaudePollActivityStore {
+  getActivities?(): Activity[]
   reconcileClaudeAgents(
     observations: readonly ClaudeAgentObservation[],
     missingSessionIds?: ReadonlySet<string> | readonly string[]
@@ -115,14 +118,28 @@ export class ClaudePoller {
         ['agents', '--json'],
         this.timeoutMs
       )
-      const observations = parseClaudeAgentOutput(stdout, this.now())
+      const pollTime = this.now()
+      const observations = parseClaudeAgentOutput(stdout, pollTime)
       const currentIds = new Set(observations.map((observation) => observation.sessionId))
-      const missingSessionIds = [...this.observedSessionIds].filter((id) => !currentIds.has(id))
+      const missingSessionIds = new Set(
+        [...this.observedSessionIds].filter((id) => !currentIds.has(id))
+      )
+      for (const activity of this.activityStore.getActivities?.() ?? []) {
+        if (
+          activity.provider === 'claude' &&
+          activity.live &&
+          !currentIds.has(activity.sessionId) &&
+          pollTime - activity.updatedAt >= CLAUDE_RECONCILE_GRACE_MS
+        ) {
+          missingSessionIds.add(activity.sessionId)
+        }
+      }
 
-      await this.activityStore.reconcileClaudeAgents(observations, missingSessionIds)
+      const missing = [...missingSessionIds]
+      await this.activityStore.reconcileClaudeAgents(observations, missing)
       this.observedSessionIds = currentIds
       this.lastError = undefined
-      return { ok: true, observations, missingSessionIds }
+      return { ok: true, observations, missingSessionIds: missing }
     } catch (cause) {
       const error = asError(cause)
       this.lastError = error
