@@ -78,7 +78,12 @@ async function bootstrap(): Promise<void> {
   const supportDir = app.getPath('userData')
   const homeDir = process.env.QPET_HOME_DIR ?? homedir()
   const settingsStore = new SettingsStore(supportDir)
-  const activityStore = new ActivityStore({ supportDir })
+  const activityStore = new ActivityStore({
+    supportDir,
+    onDiagnostic: (diagnostic) => {
+      console.warn('QPet suppressed a cross-provider activity collision.', diagnostic)
+    }
+  })
   await Promise.all([settingsStore.initialize(), activityStore.initialize()])
   await activityStore.cleanup()
 

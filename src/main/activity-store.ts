@@ -8,17 +8,25 @@ import { projectNameFor } from '../shared/activity'
 import {
   activityId,
   normalizeProviderEvent,
+  providerAdapters,
   sortActivities,
   type ClaudeAgentObservation,
   type NormalizedProviderEvent
 } from './provider-normalizers'
 
-export const CODEX_STALE_AFTER_MS = 24 * 60 * 60 * 1_000
-export const CURSOR_STALE_AFTER_MS = 5 * 60 * 1_000
-export const CLAUDE_IDLE_AFTER_MS = 5 * 60 * 1_000
+export const CODEX_STALE_AFTER_MS = providerAdapters.codex.capabilities.settleAfterMs ?? 0
+export const CURSOR_STALE_AFTER_MS = providerAdapters.cursor.capabilities.settleAfterMs ?? 0
+export const CLAUDE_IDLE_AFTER_MS = providerAdapters.claude.capabilities.settleAfterMs ?? 0
 export const ACTIVITY_RETENTION_MS = 7 * 24 * 60 * 60 * 1_000
 export const PERMISSION_DEDUPE_WINDOW_MS = 5_000
+export const PROVIDER_COLLISION_WINDOW_MS = 2_000
 export const ACTIVITY_FILE_NAME = 'activities.json'
+
+export interface ActivityStoreDiagnostic {
+  type: 'provider_collision'
+  acceptedProvider: Provider
+  rejectedProvider: Provider
+}
 
 interface StoredActivities {
   version: 1
@@ -36,6 +44,8 @@ export interface ActivityStoreOptions {
   claudeIdleAfterMs?: number
   retentionMs?: number
   dedupeWindowMs?: number
+  collisionWindowMs?: number
+  onDiagnostic?(diagnostic: ActivityStoreDiagnostic): void
 }
 
 export interface ActivityMutation {
@@ -68,9 +78,12 @@ export class ActivityStore {
   private readonly claudeIdleAfterMs: number
   private readonly retentionMs: number
   private readonly dedupeWindowMs: number
+  private readonly collisionWindowMs: number
+  private readonly onDiagnostic?: (diagnostic: ActivityStoreDiagnostic) => void
   private activities = new Map<string, Activity>()
   private readonly listeners = new Set<ActivityStoreListener>()
   private readonly recentDedupeKeys = new Map<string, number>()
+  private readonly recentProviderConfidence = new Map<string, number>()
   private loadPromise?: Promise<void>
   private operationQueue: Promise<void> = Promise.resolve()
 
@@ -88,6 +101,8 @@ export class ActivityStore {
     this.claudeIdleAfterMs = normalizedOptions.claudeIdleAfterMs ?? CLAUDE_IDLE_AFTER_MS
     this.retentionMs = normalizedOptions.retentionMs ?? ACTIVITY_RETENTION_MS
     this.dedupeWindowMs = normalizedOptions.dedupeWindowMs ?? PERMISSION_DEDUPE_WINDOW_MS
+    this.collisionWindowMs = normalizedOptions.collisionWindowMs ?? PROVIDER_COLLISION_WINDOW_MS
+    this.onDiagnostic = normalizedOptions.onDiagnostic
   }
 
   async initialize(): Promise<void> {
@@ -131,6 +146,21 @@ export class ActivityStore {
     return this.enqueue(async () => {
       const previous = this.activities.get(event.id)
       const eventTime = finiteTimestamp(event.updatedAt, this.now())
+      const collision = this.findProviderCollision(event, eventTime)
+
+      if (collision) {
+        const incomingConfidence = event.matchConfidence ?? 1
+        const existingConfidence = this.recentProviderConfidence.get(collision.id) ?? 1
+        if (incomingConfidence <= existingConfidence) {
+          this.reportCollision(collision.provider, event.provider)
+          return {
+            changed: false,
+            duplicate: true,
+            activity: cloneActivity(collision),
+            previous: cloneActivity(collision)
+          }
+        }
+      }
 
       if (event.dedupeKey && this.isDuplicate(event, previous, eventTime)) {
         return {
@@ -158,7 +188,13 @@ export class ActivityStore {
       }
 
       const nextActivities = new Map(this.activities)
+      if (collision) {
+        nextActivities.delete(collision.id)
+        this.recentProviderConfidence.delete(collision.id)
+        this.reportCollision(event.provider, collision.provider)
+      }
       nextActivities.set(next.id, next)
+      this.recentProviderConfidence.set(next.id, event.matchConfidence ?? 1)
       await this.commit(nextActivities)
       this.emit({
         activities: this.getActivities(),
@@ -356,6 +392,36 @@ export class ActivityStore {
   private pruneDedupeKeys(now: number): void {
     for (const [key, timestamp] of this.recentDedupeKeys) {
       if (now - timestamp > this.dedupeWindowMs) this.recentDedupeKeys.delete(key)
+    }
+  }
+
+  private findProviderCollision(
+    event: NormalizedProviderEvent,
+    eventTime: number
+  ): Activity | undefined {
+    for (const activity of this.activities.values()) {
+      if (
+        activity.provider !== event.provider &&
+        activity.sessionId === event.sessionId &&
+        activity.cwd === event.cwd &&
+        activity.state === event.state &&
+        Math.abs(eventTime - activity.updatedAt) <= this.collisionWindowMs
+      ) {
+        return activity
+      }
+    }
+    return undefined
+  }
+
+  private reportCollision(acceptedProvider: Provider, rejectedProvider: Provider): void {
+    try {
+      this.onDiagnostic?.({
+        type: 'provider_collision',
+        acceptedProvider,
+        rejectedProvider
+      })
+    } catch {
+      // Diagnostics must never interrupt provider event processing.
     }
   }
 

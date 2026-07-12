@@ -27,6 +27,78 @@ async function makeStore(now: () => number): Promise<{ store: ActivityStore; dir
 }
 
 describe('ActivityStore', () => {
+  it('accepts a duplicated Cursor payload only through the Cursor adapter', async () => {
+    const { store } = await makeStore(() => 100)
+    const payload = {
+      session_id: 'shared-id',
+      conversation_id: 'shared-id',
+      workspace_roots: ['/tmp/project'],
+      hook_event_name: 'postToolUse'
+    }
+
+    expect(await store.ingest('claude', payload)).toBeNull()
+    expect(await store.ingest('cursor', payload)).toMatchObject({
+      changed: true,
+      duplicate: false
+    })
+    expect(store.getActivities()).toEqual([
+      expect.objectContaining({ provider: 'cursor', sessionId: 'shared-id' })
+    ])
+  })
+
+  it('prefers stronger adapter evidence for near-simultaneous provider collisions', async () => {
+    const diagnostics: Array<{
+      type: 'provider_collision'
+      acceptedProvider: 'codex' | 'claude' | 'cursor'
+      rejectedProvider: 'codex' | 'claude' | 'cursor'
+    }> = []
+    const directory = await mkdtemp(join(tmpdir(), 'qpet-collision-'))
+    temporaryDirectories.push(directory)
+    const store = new ActivityStore({
+      supportDir: directory,
+      now: () => 101,
+      onDiagnostic: (diagnostic) => diagnostics.push(diagnostic)
+    })
+    await store.initialize()
+
+    await store.applyEvent({
+      id: 'claude:shared-id',
+      provider: 'claude',
+      sessionId: 'shared-id',
+      cwd: '/tmp/project',
+      projectName: 'project',
+      state: 'running',
+      summary: 'Claude is working',
+      updatedAt: 100,
+      unread: false,
+      live: true,
+      matchConfidence: 2
+    })
+    await store.applyEvent({
+      id: 'cursor:shared-id',
+      provider: 'cursor',
+      sessionId: 'shared-id',
+      cwd: '/tmp/project',
+      projectName: 'project',
+      state: 'running',
+      summary: 'Cursor is working',
+      updatedAt: 101,
+      unread: false,
+      live: true,
+      matchConfidence: 3
+    })
+
+    expect(store.getActivities()).toEqual([
+      expect.objectContaining({ provider: 'cursor', sessionId: 'shared-id' })
+    ])
+    expect(diagnostics).toEqual([{
+      type: 'provider_collision',
+      acceptedProvider: 'cursor',
+      rejectedProvider: 'claude'
+    }])
+    expect(JSON.stringify(diagnostics)).not.toContain('shared-id')
+  })
+
   it('persists only normalized fields and reloads the cache', async () => {
     const { store, directory } = await makeStore(() => 100)
     await store.ingest('claude', {

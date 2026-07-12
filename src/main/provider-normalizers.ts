@@ -20,6 +20,23 @@ export interface NormalizedProviderEvent extends Activity {
   close?: boolean
   /** Used only in memory to collapse two provider events for the same prompt. */
   dedupeKey?: string
+  /** Transient adapter evidence used to resolve cross-provider collisions. */
+  matchConfidence?: number
+}
+
+export interface ProviderCapabilities {
+  inputRequests: boolean
+  explicitCompletion: boolean
+  authoritativePresence: boolean
+  reconciliation: 'hook-stale' | 'agents-json' | 'inactivity'
+  settleAfterMs?: number
+}
+
+export interface ProviderAdapter {
+  provider: Provider
+  capabilities: ProviderCapabilities
+  match(payload: unknown): number
+  normalize(payload: unknown, now?: number): NormalizedProviderEvent | null
 }
 
 /** A privacy-safe snapshot returned by `claude agents --json`. */
@@ -44,9 +61,11 @@ export function normalizeProviderEvent(
   payload: unknown,
   now = Date.now()
 ): NormalizedProviderEvent | null {
-  if (provider === 'codex') return normalizeCodexEvent(payload, now)
-  if (provider === 'claude') return normalizeClaudeEvent(payload, now)
-  return normalizeCursorEvent(payload, now)
+  const adapter = providerAdapters[provider]
+  const matchConfidence = adapter.match(payload)
+  if (matchConfidence === 0) return null
+  const event = adapter.normalize(payload, now)
+  return event ? { ...event, matchConfidence } : null
 }
 
 export function normalizeCursorEvent(
@@ -54,7 +73,7 @@ export function normalizeCursorEvent(
   now = Date.now()
 ): NormalizedProviderEvent | null {
   const input = asRecord(payload)
-  if (!input) return null
+  if (!input || cursorPayloadMatch(input) === 0) return null
 
   const identity = readIdentity('cursor', input)
   if (!identity) return null
@@ -98,7 +117,7 @@ export function normalizeCodexEvent(
   now = Date.now()
 ): NormalizedProviderEvent | null {
   const input = asRecord(payload)
-  if (!input) return null
+  if (!input || codexPayloadMatch(input) === 0) return null
 
   const identity = readIdentity('codex', input)
   if (!identity) return null
@@ -146,7 +165,7 @@ export function normalizeClaudeEvent(
   now = Date.now()
 ): NormalizedProviderEvent | null {
   const input = asRecord(payload)
-  if (!input) return null
+  if (!input || claudePayloadMatch(input) === 0) return null
 
   const identity = readIdentity('claude', input)
   if (!identity) return null
@@ -435,4 +454,137 @@ function hasOutstandingWork(value: unknown): boolean {
   if (Array.isArray(value)) return value.length > 0
   if (value && typeof value === 'object') return Object.keys(value).length > 0
   return false
+}
+
+const CODEX_EVENTS = new Set([
+  'sessionstart',
+  'userpromptsubmit',
+  'permissionrequest',
+  'posttooluse',
+  'stop',
+  'agentturncomplete'
+])
+const CLAUDE_EVENTS = new Set([
+  'sessionstart',
+  'userpromptsubmit',
+  'permissionrequest',
+  'elicitation',
+  'pretooluse',
+  'posttooluse',
+  'notification',
+  'stop',
+  'stopfailure',
+  'sessionend'
+])
+const CURSOR_EVENTS = new Set([
+  'sessionstart',
+  'beforesubmitprompt',
+  'afteragentthought',
+  'posttooluse',
+  'afteragentresponse',
+  'stop',
+  'sessionend'
+])
+
+function eventName(input: Record<string, unknown>): string {
+  return canonicalEventName(readString(input, [
+    'hook_event_name',
+    'hookEventName',
+    'event_name',
+    'eventName',
+    'event',
+    'type'
+  ]))
+}
+
+function hasCursorFingerprint(input: Record<string, unknown>): boolean {
+  return hasAnyKey(input, ['conversation_id', 'conversationId', 'workspace_roots', 'workspaceRoots'])
+}
+
+function hasAnyKey(input: Record<string, unknown>, keys: readonly string[]): boolean {
+  return keys.some((key) => Object.prototype.hasOwnProperty.call(input, key))
+}
+
+function cursorPayloadMatch(input: Record<string, unknown>): number {
+  if (!hasAnyKey(input, ['conversation_id', 'conversationId'])) return 0
+  return CURSOR_EVENTS.has(eventName(input)) ? 3 : 0
+}
+
+function claudePayloadMatch(input: Record<string, unknown>): number {
+  if (hasCursorFingerprint(input) || !CLAUDE_EVENTS.has(eventName(input))) return 0
+  if (!readString(input, ['session_id', 'sessionId', 'session-id']) || !readWorkingDirectory(input)) {
+    return 0
+  }
+  return hasAnyKey(input, [
+    'notification_type',
+    'notificationType',
+    'background_tasks',
+    'session_crons',
+    'transcript_path'
+  ]) ? 3 : 2
+}
+
+function codexPayloadMatch(input: Record<string, unknown>): number {
+  if (hasCursorFingerprint(input) || !CODEX_EVENTS.has(eventName(input))) return 0
+  if (!readString(input, [
+    'session_id',
+    'sessionId',
+    'thread_id',
+    'threadId',
+    'thread-id',
+    'session-id'
+  ]) || !readWorkingDirectory(input)) {
+    return 0
+  }
+  return hasAnyKey(input, ['thread_id', 'threadId', 'thread-id']) || eventName(input) === 'agentturncomplete'
+    ? 3
+    : 2
+}
+
+export const providerAdapters: Readonly<Record<Provider, ProviderAdapter>> = {
+  codex: {
+    provider: 'codex',
+    capabilities: {
+      inputRequests: true,
+      explicitCompletion: true,
+      authoritativePresence: false,
+      reconciliation: 'hook-stale',
+      settleAfterMs: 24 * 60 * 60 * 1_000
+    },
+    match: (payload) => {
+      const input = asRecord(payload)
+      return input ? codexPayloadMatch(input) : 0
+    },
+    normalize: normalizeCodexEvent
+  },
+  claude: {
+    provider: 'claude',
+    capabilities: {
+      inputRequests: true,
+      explicitCompletion: true,
+      authoritativePresence: true,
+      reconciliation: 'agents-json',
+      settleAfterMs: 5 * 60 * 1_000
+    },
+    match: (payload) => {
+      const input = asRecord(payload)
+      return input ? claudePayloadMatch(input) : 0
+    },
+    normalize: normalizeClaudeEvent
+  },
+  cursor: {
+    provider: 'cursor',
+    capabilities: {
+      inputRequests: false,
+      explicitCompletion: true,
+      authoritativePresence: false,
+      reconciliation: 'inactivity',
+      settleAfterMs: 5 * 60 * 1_000
+    },
+    match: (payload) => {
+      const input = asRecord(payload)
+      return input ? cursorPayloadMatch(input) : 0
+    },
+    normalize: normalizeCursorEvent
+  }
 }

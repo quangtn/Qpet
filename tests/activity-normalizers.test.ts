@@ -5,6 +5,7 @@ import {
   normalizeClaudeEvent,
   normalizeCodexEvent,
   normalizeCursorEvent,
+  providerAdapters,
   sortActivities
 } from '../src/main/provider-normalizers'
 import type { Activity } from '../src/shared/contracts'
@@ -66,6 +67,31 @@ describe('provider event normalizers', () => {
       cwd: '/tmp/project',
       hook_event_name: 'postToolUse'
     })).toBeNull()
+    const cursorPayloadSeenByClaude = {
+      session_id: 'shared-id',
+      conversation_id: 'shared-id',
+      workspace_roots: ['/tmp/project'],
+      hook_event_name: 'postToolUse'
+    }
+    expect(providerAdapters.claude.match(cursorPayloadSeenByClaude)).toBe(0)
+    expect(normalizeClaudeEvent(cursorPayloadSeenByClaude)).toBeNull()
+    expect(providerAdapters.cursor.match(cursorPayloadSeenByClaude)).toBe(3)
+  })
+
+  it('declares provider-specific lifecycle and reconciliation capabilities', () => {
+    expect(providerAdapters.codex.capabilities).toMatchObject({
+      inputRequests: true,
+      explicitCompletion: true,
+      reconciliation: 'hook-stale'
+    })
+    expect(providerAdapters.claude.capabilities).toMatchObject({
+      authoritativePresence: true,
+      reconciliation: 'agents-json'
+    })
+    expect(providerAdapters.cursor.capabilities).toMatchObject({
+      inputRequests: false,
+      reconciliation: 'inactivity'
+    })
   })
 
   it('maps Codex lifecycle events without retaining prompts or commands', () => {
