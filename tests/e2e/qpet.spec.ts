@@ -47,8 +47,12 @@ async function pageFor(app: ElectronApplication, mode: string): Promise<Page> {
 async function trayIsVisible(app: ElectronApplication): Promise<boolean> {
   return app.evaluate(({ BrowserWindow }) => {
     const tray = BrowserWindow.getAllWindows().find((candidate) => {
-      const url = new URL(candidate.webContents.getURL())
-      return url.searchParams.get('window') === 'tray'
+      try {
+        const url = new URL(candidate.webContents.getURL())
+        return url.searchParams.get('window') === 'tray'
+      } catch {
+        return false
+      }
     })
     return tray?.isVisible() ?? false
   })
@@ -343,7 +347,7 @@ test('normalizes provider events and prioritizes the floating pet activity tray'
     })
     expect(settingsWindowMetrics.bounds.width).toBeGreaterThanOrEqual(720)
     expect(settingsWindowMetrics.bounds.height).toBe(
-      Math.min(780, settingsWindowMetrics.workArea.height)
+      Math.max(680, Math.min(780, settingsWindowMetrics.workArea.height))
     )
     const settingsClosed = settings.waitForEvent('close')
     await settings.getByRole('button', { name: 'Close settings' }).click()
