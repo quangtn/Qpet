@@ -329,16 +329,22 @@ test('normalizes provider events and prioritizes the floating pet activity tray'
       'font-size',
       '14px'
     )
-    const settingsBounds = await electronApp.evaluate(({ BrowserWindow }) => {
+    const settingsWindowMetrics = await electronApp.evaluate(({ BrowserWindow, screen }) => {
       const window = BrowserWindow.getAllWindows().find((candidate) => {
         const url = new URL(candidate.webContents.getURL())
         return url.searchParams.get('window') === 'settings'
       })
       if (!window) throw new Error('Settings window is missing')
-      return window.getBounds()
+      const bounds = window.getBounds()
+      return {
+        bounds,
+        workArea: screen.getDisplayMatching(bounds).workArea
+      }
     })
-    expect(settingsBounds.width).toBeGreaterThanOrEqual(720)
-    expect(settingsBounds.height).toBeGreaterThanOrEqual(780)
+    expect(settingsWindowMetrics.bounds.width).toBeGreaterThanOrEqual(720)
+    expect(settingsWindowMetrics.bounds.height).toBe(
+      Math.min(780, settingsWindowMetrics.workArea.height)
+    )
     const settingsClosed = settings.waitForEvent('close')
     await settings.getByRole('button', { name: 'Close settings' }).click()
     await settingsClosed
