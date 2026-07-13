@@ -390,6 +390,23 @@ test('normalizes provider events and prioritizes the floating pet activity tray'
       'aria-label',
       'Open Claude Desktop'
     )
+    const claudeStatusSpareWidth = await pet.getByTestId('provider-status-claude').evaluate((element) => {
+      const clone = element.cloneNode(true) as typeof element
+      clone.style.position = 'fixed'
+      clone.style.visibility = 'hidden'
+      clone.style.width = `${element.getBoundingClientRect().width}px`
+      element.ownerDocument.body.append(clone)
+      const label = clone.querySelector('strong')
+      if (!label) {
+        clone.remove()
+        return 0
+      }
+      label.textContent = '13 Needs input'
+      const availableWidth = label.clientWidth - label.scrollWidth
+      clone.remove()
+      return availableWidth
+    })
+    expect(claudeStatusSpareWidth).toBeGreaterThanOrEqual(0)
 
     await pet.getByTestId('pet').click()
     const cards = tray.getByTestId('activity-card')

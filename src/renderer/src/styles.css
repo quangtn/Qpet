@@ -393,9 +393,9 @@ html[data-window='dictation'] #root {
   position: absolute;
   z-index: 12;
   top: 26px;
-  right: 4px;
+  right: 2px;
   display: grid;
-  width: 68px;
+  width: 80px;
   gap: 7px;
   pointer-events: none;
 }
