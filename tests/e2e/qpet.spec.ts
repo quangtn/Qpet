@@ -722,6 +722,69 @@ test('keeps completed work unread while the tray is hidden and acknowledges it o
   }
 })
 
+test('does not let a closed Claude failure hide newer live work', async () => {
+  const userData = await mkdtemp(join(tmpdir(), 'qpet-e2e-claude-recovery-'))
+  const fakeHome = join(userData, 'home')
+  await mkdir(fakeHome, { recursive: true })
+  await writeFile(
+    join(userData, 'activities.json'),
+    `${JSON.stringify({
+      version: 1,
+      activities: [
+        {
+          provider: 'claude',
+          sessionId: 'rate-limited-session',
+          cwd: '/tmp/qpet-rate-limited',
+          state: 'blocked',
+          summary: 'Claude could not finish',
+          updatedAt: Date.now() - 1_000,
+          unread: true,
+          live: false
+        },
+        {
+          provider: 'claude',
+          sessionId: 'recovered-session',
+          cwd: '/tmp/qpet-recovered',
+          state: 'running',
+          summary: 'Claude is working',
+          updatedAt: Date.now(),
+          unread: false,
+          live: true
+        }
+      ]
+    })}\n`,
+    { mode: 0o600 }
+  )
+
+  const electronApp = await electron.launch({
+    args: [join(process.cwd(), 'out/main/index.js')],
+    cwd: process.cwd(),
+    env: {
+      ...process.env,
+      NODE_ENV: 'production',
+      QPET_USER_DATA_DIR: userData,
+      QPET_HOME_DIR: fakeHome,
+      QPET_TEST_MODE: '1',
+      QPET_DISABLE_POLLING: '1',
+      QPET_SKIP_ONBOARDING: '1'
+    }
+  })
+
+  try {
+    const pet = await pageFor(electronApp, 'pet')
+    const tray = await pageFor(electronApp, 'tray')
+
+    await expect(pet.getByTestId('pet')).toHaveAttribute('data-state', 'running')
+    await expect(pet.getByTestId('provider-status-claude')).toHaveText('Claude1 Working')
+
+    await pet.getByTestId('pet').click()
+    await expect(tray.getByTestId('activity-card')).toHaveCount(2)
+    await expect(tray.locator('[data-provider="claude"][data-state="blocked"]')).toHaveCount(1)
+  } finally {
+    await electronApp.close()
+  }
+})
+
 test('persists pet moves and clamps an offscreen saved position on restart', async () => {
   const userData = await mkdtemp(join(tmpdir(), 'qpet-e2e-position-'))
   const fakeHome = join(userData, 'home')

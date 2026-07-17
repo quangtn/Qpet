@@ -35,9 +35,9 @@ function summarizeProvider(activities: Activity[]): ProviderSummary | null {
   const countByState = (state: Activity['state'], liveOnly = false): number =>
     activities.filter((activity) => activity.state === state && (!liveOnly || activity.live)).length
 
-  const input = countByState('needs_input')
+  const input = countByState('needs_input', true)
   if (input > 0) return { count: input, label: 'needs-input' }
-  const blocked = countByState('blocked')
+  const blocked = countByState('blocked', true)
   if (blocked > 0) return { count: blocked, label: 'blocked' }
   const working = countByState('running', true)
   if (working > 0) return { count: working, label: 'working' }
@@ -83,7 +83,8 @@ export function Pet({ activities, loading, theme, dictation }: PetProps): React.
             ? 'Dictation error'
             : undefined
   const attentionCount = activities.filter(
-    (activity) => activity.state === 'needs_input' || activity.state === 'blocked'
+    (activity) =>
+      activity.live && (activity.state === 'needs_input' || activity.state === 'blocked')
   ).length
   const providerSummaries = providers.flatMap((provider) => {
     const summary = summarizeProvider(activities.filter((activity) => activity.provider === provider))

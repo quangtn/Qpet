@@ -31,7 +31,10 @@ export const healthLabels: Record<IntegrationHealth, string> = {
 
 export function getPetMood(activities: Activity[]): PetMood {
   const relevant = activities.filter(
-    (activity) => activity.state !== 'ready' || activity.unread
+    (activity) => {
+      if (activity.state === 'ready') return activity.unread
+      return activity.live
+    }
   )
   return sortActivities(relevant)[0]?.state ?? 'sleeping'
 }
