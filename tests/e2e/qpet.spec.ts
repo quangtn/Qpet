@@ -2,7 +2,7 @@ import { expect, test, _electron as electron, type ElectronApplication, type Pag
 import { mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import type { QPetApi } from '../../src/shared/contracts'
+import type { Provider, QPetApi } from '../../src/shared/contracts'
 
 const PRELOAD_ALLOWLIST = [
   'beginPetDrag',
@@ -328,7 +328,16 @@ test('normalizes provider events and prioritizes the floating pet activity tray'
     await dictationSwitch.click()
     await expect(settings.getByText('⌃ ⌥ Space')).toBeVisible()
     await settings.getByRole('button', { name: 'Integrations' }).click()
-    await expect(settings.locator('.integration-card')).toHaveCount(3)
+    await expect(settings.locator('.integration-card')).toHaveCount(5)
+    await expect.poll(async () =>
+      settings.locator('.integration-card .provider-logo img').evaluateAll((images) =>
+        images.map((image) =>
+          typeof (image as unknown as { naturalWidth?: unknown }).naturalWidth === 'number'
+            ? (image as unknown as { naturalWidth: number }).naturalWidth
+            : 0
+        )
+      )
+    ).toEqual([256, 256, 256, 256, 256])
     await expect(settings.locator('.integration-card-title strong').first()).toHaveCSS(
       'font-size',
       '14px'
@@ -358,7 +367,7 @@ test('normalizes provider events and prioritizes the floating pet activity tray'
     ) as { baseUrl: string }
     const token = await readFile(join(userData, 'event-token'), 'utf8')
 
-    const postEvent = async (provider: 'codex' | 'claude' | 'cursor', payload: object): Promise<void> => {
+    const postEvent = async (provider: Provider, payload: object): Promise<void> => {
       const response = await fetch(`${endpoint.baseUrl}/v1/events/${provider}`, {
         method: 'POST',
         headers: {
@@ -377,12 +386,12 @@ test('normalizes provider events and prioritizes the floating pet activity tray'
       prompt: 'This sensitive prompt must never appear in the UI or cache.'
     })
     await expect(pet.getByTestId('pet')).toHaveAttribute('data-state', 'running')
-    await expect(pet.getByTestId('provider-status-codex')).toHaveText('Codex1 Working')
+    await expect(pet.getByTestId('provider-status-codex')).toHaveText('ChatGPT1 Working')
     await expect(pet.locator('.provider-statuses')).toHaveAttribute('data-count', '1')
     await expect(pet.locator('.provider-statuses')).toHaveCSS('top', '46px')
     await expect(pet.getByTestId('provider-status-codex')).toHaveAttribute(
       'aria-label',
-      'Open Codex Desktop'
+      'Open ChatGPT Desktop'
     )
     await expect(pet.getByTestId('provider-status-codex')).toHaveCSS('pointer-events', 'auto')
 
@@ -465,7 +474,7 @@ test('normalizes provider events and prioritizes the floating pet activity tray'
       last_assistant_message: 'Another sensitive result'
     })
     await expect(pet.getByTestId('pet')).toHaveAttribute('data-state', 'ready')
-    await expect(pet.getByTestId('provider-status-codex')).toHaveText('Codex1 Ready')
+    await expect(pet.getByTestId('provider-status-codex')).toHaveText('ChatGPT1 Ready')
     await expect(pet.getByTestId('provider-status-claude')).toHaveText('Claude1 Ready')
 
     await postEvent('claude', {
@@ -501,6 +510,39 @@ test('normalizes provider events and prioritizes the floating pet activity tray'
     )
     await expect(pet.locator('.provider-statuses')).toHaveAttribute('data-count', '3')
     await expect(pet.locator('.provider-statuses')).toHaveCSS('top', '7px')
+
+    await postEvent('hermes', {
+      hook_event_name: 'pre_llm_call',
+      session_id: 'hermes-e2e',
+      cwd: '/tmp/qpet-hermes',
+      tool_input: null,
+      extra: { user_message: 'Private Hermes prompt' }
+    })
+    await expect(pet.getByTestId('provider-status-hermes')).toHaveText('Hermes1 Working')
+    await expect(pet.getByTestId('provider-status-hermes')).toHaveAttribute(
+      'aria-label',
+      'Open Hermes Desktop'
+    )
+
+    await postEvent('claudeclaw', {
+      hook_event_name: 'PermissionRequest',
+      session_id: 'claw-e2e',
+      cwd: '/tmp/qpet-claudeclaw',
+      tool_input: { command: 'private daemon command' }
+    })
+    await expect(pet.getByTestId('pet')).toHaveAttribute('data-state', 'needs_input')
+    await expect(pet.getByTestId('provider-status-claudeclaw')).toHaveText(
+      'ClaudeClaw1 Needs input'
+    )
+    await expect(pet.getByTestId('provider-status-claudeclaw')).toHaveAttribute(
+      'aria-label',
+      'Open ClaudeClaw dashboard'
+    )
+    await expect(pet.locator('.provider-statuses')).toHaveAttribute('data-count', '5')
+    await expect(pet.locator('.provider-statuses')).toHaveCSS('top', '1px')
+    await expect(tray.locator('[data-provider="hermes"]')).toHaveCount(1)
+    await expect(tray.locator('[data-provider="claudeclaw"]')).toHaveCount(1)
+    await expect(tray.getByText('private daemon command')).toHaveCount(0)
   } finally {
     await electronApp.close()
   }

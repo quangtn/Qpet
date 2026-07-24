@@ -9,14 +9,17 @@ import type {
 } from '../shared/contracts'
 import { shellQuote } from '../shared/shell'
 import type { DiscoveredBinary } from './binary-discovery'
+import type { ClaudeClawWorkspace } from './claudeclaw-discovery'
 
 export type BinaryReference = string | DiscoveredBinary
 
 export interface SessionActionDependencies {
   binaries: Partial<Record<Provider, BinaryReference>>
   openPath?: (path: string) => Promise<string | void>
+  openExternal?: (url: string) => Promise<void>
   copyText?: (text: string) => void | Promise<void>
   runAppleScript?: (script: string, args: readonly string[]) => Promise<void>
+  resolveClaudeClaw?: (cwd: string) => Promise<ClaudeClawWorkspace | undefined>
 }
 
 export const TERMINAL_APPLESCRIPT = `on run argv
@@ -31,6 +34,27 @@ end run`
 
 function validValue(value: string): boolean {
   return value.length > 0 && value.length <= 16_384 && !value.includes('\0')
+}
+
+function safeClaudeClawDashboard(value: string | undefined): string | undefined {
+  if (!value) return undefined
+  try {
+    const url = new URL(value)
+    const port = Number(url.port)
+    if (
+      url.protocol !== 'http:' ||
+      url.hostname !== '127.0.0.1' ||
+      url.pathname !== '/' ||
+      url.search ||
+      url.hash ||
+      !Number.isSafeInteger(port) ||
+      port < 1 ||
+      port > 65_535
+    ) return undefined
+    return url.toString().replace(/\/$/, '')
+  } catch {
+    return undefined
+  }
 }
 
 export { shellQuote }
@@ -52,6 +76,9 @@ export function buildSessionCommand(
   action: Extract<SessionAction, 'attach' | 'resume'>,
   binaries: Partial<Record<Provider, BinaryReference>>
 ): string {
+  if (activity.provider === 'claudeclaw') {
+    throw new Error('ClaudeClaw sessions are managed by the daemon and cannot be resumed directly')
+  }
   const reference = binaries[activity.provider]
   const executable = binaryPath(reference)
   if (!executable) throw new Error(`${activity.provider} executable is unavailable`)
@@ -76,6 +103,9 @@ export function buildSessionCommand(
   if (activity.provider === 'claude') {
     return `${shellQuote(executable)} --resume ${shellQuote(activity.sessionId)}`
   }
+  if (activity.provider === 'hermes') {
+    return `${shellQuote(executable)} --resume ${shellQuote(activity.sessionId)}`
+  }
   if (activity.provider === 'cursor') {
     return `${shellQuote(executable)} agent --resume ${shellQuote(activity.sessionId)}`
   }
@@ -91,6 +121,7 @@ export function buildCopyableCommand(
   }
 
   const prefix = `cd ${shellQuote(activity.cwd)}`
+  if (activity.provider === 'claudeclaw') return prefix
   if (activity.provider === 'claude' && activity.backgroundJobId) {
     return `${prefix} && ${buildSessionCommand(activity, 'attach', binaries)}`
   }
@@ -127,6 +158,11 @@ async function defaultOpenPath(path: string): Promise<string> {
   return shell.openPath(path)
 }
 
+async function defaultOpenExternal(url: string): Promise<void> {
+  const { shell } = await import('electron')
+  await shell.openExternal(url)
+}
+
 async function defaultCopyText(text: string): Promise<void> {
   const { clipboard } = await import('electron')
   clipboard.writeText(text)
@@ -146,6 +182,25 @@ export async function performSessionAction(
       const error = await (dependencies.openPath ?? defaultOpenPath)(activity.cwd)
       if (typeof error === 'string' && error) throw new Error(error)
       return { ok: true, message: 'Project opened.' }
+    }
+
+    if (action === 'open_provider') {
+      if (activity.provider !== 'claudeclaw' || !dependencies.resolveClaudeClaw) {
+        throw new Error('This provider does not expose a dedicated activity view')
+      }
+      const workspace = await dependencies.resolveClaudeClaw(activity.cwd)
+      if (!workspace) throw new Error('ClaudeClaw workspace is no longer available')
+      const dashboard = safeClaudeClawDashboard(workspace.webUrl)
+      if (dashboard) {
+        await (dependencies.openExternal ?? defaultOpenExternal)(dashboard)
+        return { ok: true, message: 'ClaudeClaw dashboard opened.' }
+      }
+      const error = await (dependencies.openPath ?? defaultOpenPath)(workspace.root)
+      if (typeof error === 'string' && error) throw new Error(error)
+      return {
+        ok: true,
+        message: 'ClaudeClaw dashboard is unavailable; the workspace was opened instead.'
+      }
     }
 
     if (action === 'copy_command') {

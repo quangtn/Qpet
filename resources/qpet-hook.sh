@@ -7,7 +7,7 @@ export LC_ALL=C
 
 provider=${1-}
 case "$provider" in
-  codex|claude|cursor) ;;
+  codex|claude|cursor|hermes|claudeclaw) ;;
   *) exit 0 ;;
 esac
 

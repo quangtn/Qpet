@@ -413,6 +413,30 @@ html[data-window='dictation'] #root {
   min-height: 29px;
 }
 
+.provider-statuses[data-count='4'],
+.provider-statuses[data-count='5'] {
+  top: 1px;
+  gap: 2px;
+}
+
+.provider-statuses[data-count='4'] .provider-status,
+.provider-statuses[data-count='5'] .provider-status {
+  min-height: 20px;
+  padding-block: 1px;
+  border-radius: 7px;
+}
+
+.provider-statuses[data-count='4'] small,
+.provider-statuses[data-count='5'] small {
+  font-size: 6px;
+}
+
+.provider-statuses[data-count='4'] strong,
+.provider-statuses[data-count='5'] strong {
+  margin-top: 1px;
+  font-size: 7px;
+}
+
 .provider-status {
   display: grid;
   min-height: 34px;
@@ -454,6 +478,14 @@ html[data-window='dictation'] #root {
 
 .provider-status-cursor {
   background: #5c58a8;
+}
+
+.provider-status-hermes {
+  background: #252525;
+}
+
+.provider-status-claudeclaw {
+  background: #a61f2a;
 }
 
 .provider-status[data-state='input'],
@@ -1160,6 +1192,11 @@ html[data-window='dictation'] #root {
 }
 
 .provider-cursor {
+  background: transparent;
+}
+
+.provider-hermes,
+.provider-claudeclaw {
   background: transparent;
 }
 

@@ -11,6 +11,7 @@ import {
   CODEX_STALE_AFTER_MS,
   CURSOR_STALE_AFTER_MS
 } from '../src/main/activity-store'
+import type { Provider } from '../src/shared/contracts'
 
 const temporaryDirectories: string[] = []
 
@@ -49,8 +50,8 @@ describe('ActivityStore', () => {
   it('prefers stronger adapter evidence for near-simultaneous provider collisions', async () => {
     const diagnostics: Array<{
       type: 'provider_collision'
-      acceptedProvider: 'codex' | 'claude' | 'cursor'
-      rejectedProvider: 'codex' | 'claude' | 'cursor'
+      acceptedProvider: Provider
+      rejectedProvider: Provider
     }> = []
     const directory = await mkdtemp(join(tmpdir(), 'qpet-collision-'))
     temporaryDirectories.push(directory)
@@ -132,6 +133,30 @@ describe('ActivityStore', () => {
     const reloaded = new ActivityStore({ supportDir: directory, now: () => 101 })
     await reloaded.initialize()
     expect(reloaded.getActivities()).toEqual(store.getActivities())
+  })
+
+  it('reclassifies stored Claude activity inside ClaudeClaw workspaces', async () => {
+    const { store, directory } = await makeStore(() => 100)
+    await store.ingest('claude', {
+      session_id: 'claw-session',
+      cwd: '/Users/test/assistants/claw/agents/research',
+      hook_event_name: 'UserPromptSubmit',
+      prompt: 'DO NOT RETAIN'
+    })
+
+    expect(
+      await store.reclassifyClaudeActivities(['/Users/test/assistants/claw'])
+    ).toBe(1)
+    expect(store.getActivities()).toEqual([
+      expect.objectContaining({
+        id: 'claudeclaw:claw-session',
+        provider: 'claudeclaw',
+        summary: 'ClaudeClaw is working'
+      })
+    ])
+    const persisted = await readFile(join(directory, 'activities.json'), 'utf8')
+    expect(persisted).not.toContain('DO NOT RETAIN')
+    expect(persisted).not.toContain('"provider": "claude"')
   })
 
   it('deduplicates overlapping Claude permission hooks', async () => {

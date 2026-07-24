@@ -19,12 +19,14 @@ import {
   type FormattingOptions,
   type ParseError
 } from 'jsonc-parser'
+import { isMap, isSeq, parseDocument } from 'yaml'
 
-import type {
-  InstallResult,
-  IntegrationDetail,
-  IntegrationStatus,
-  Provider
+import {
+  PROVIDER_LABELS,
+  type InstallResult,
+  type IntegrationDetail,
+  type IntegrationStatus,
+  type Provider
 } from '../shared/contracts'
 import { shellQuote } from '../shared/shell'
 import {
@@ -32,6 +34,7 @@ import {
   type BinaryDiscoveryOptions,
   type DiscoveredBinary
 } from './binary-discovery'
+import type { ClaudeClawWorkspace } from './claudeclaw-discovery'
 
 export const QPET_HOOK_TAG = 'qpet-v1'
 export const QPET_HELPER_NAME = 'qpet-hook.sh'
@@ -66,6 +69,13 @@ export const CURSOR_HOOK_EVENTS = [
   'sessionEnd'
 ] as const
 
+export const HERMES_HOOK_EVENTS = [
+  'pre_llm_call',
+  'pre_approval_request',
+  'post_approval_response',
+  'on_session_end'
+] as const
+
 type JsonObject = Record<string, unknown>
 type NestedHookEventName = (typeof CODEX_HOOK_EVENTS)[number] | (typeof CLAUDE_HOOK_EVENTS)[number]
 type CursorHookEventName = (typeof CURSOR_HOOK_EVENTS)[number]
@@ -78,10 +88,13 @@ export interface IntegrationManagerOptions {
   codexHooksPath?: string
   claudeSettingsPath?: string
   cursorHooksPath?: string
+  hermesConfigPath?: string
+  hermesAllowlistPath?: string
   binaryDiscovery?: BinaryDiscoveryOptions
   discover?: () => Promise<Partial<Record<Provider, DiscoveredBinary>>>
   isListenerActive?: () => boolean
   listenerMessage?: () => string | undefined
+  claudeClawWorkspaces?: () => Promise<readonly ClaudeClawWorkspace[]>
   now?: () => Date
 }
 
@@ -96,6 +109,13 @@ function isObject(value: unknown): value is JsonObject {
 
 function commandFor(helperPath: string, provider: Provider): string {
   return `QPET_HOOK_TAG=${QPET_HOOK_TAG} ${shellQuote(helperPath)} ${provider}`
+}
+
+function hermesCommandFor(helperPath: string): string {
+  // Hermes tokenizes hook commands and launches them with shell=false, so an
+  // environment assignment must be passed through env rather than used as a
+  // shell prefix.
+  return `/usr/bin/env QPET_HOOK_TAG=${QPET_HOOK_TAG} ${shellQuote(helperPath)} hermes`
 }
 
 function qpetHandler(helperPath: string, provider: Provider): JsonObject {
@@ -362,6 +382,135 @@ async function updateConfig(
   return true
 }
 
+interface HermesDocument {
+  source: string
+  document: ReturnType<typeof parseDocument>
+}
+
+async function readHermesDocument(path: string): Promise<HermesDocument> {
+  let source: string
+  try {
+    source = await readFile(path, 'utf8')
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') source = '{}\n'
+    else throw error
+  }
+
+  const document = parseDocument(source.trim() ? source : '{}\n', {
+    keepSourceTokens: true
+  })
+  if (document.errors.length > 0 || (document.contents !== null && !isMap(document.contents))) {
+    throw new Error(`Cannot safely update invalid YAML settings at ${path}`)
+  }
+  return { source: source.trim() ? source : '{}\n', document }
+}
+
+function isQPetHermesHook(value: unknown): boolean {
+  if (!isMap(value)) return false
+  const command = value.get('command')
+  return typeof command === 'string' &&
+    command.includes(`QPET_HOOK_TAG=${QPET_HOOK_TAG}`) &&
+    command.includes(QPET_HELPER_NAME)
+}
+
+function hasQPetHermesHooks(
+  document: ReturnType<typeof parseDocument>,
+  helperPath: string
+): boolean {
+  const hooks = document.get('hooks', true)
+  if (!isMap(hooks)) return false
+  const expectedCommand = hermesCommandFor(helperPath)
+  return HERMES_HOOK_EVENTS.every((event) => {
+    const entries = hooks.get(event, true)
+    return isSeq(entries) && entries.items.some((entry) =>
+      isMap(entry) && entry.get('command') === expectedCommand
+    )
+  })
+}
+
+function mergeQPetHermesHooks(
+  document: ReturnType<typeof parseDocument>,
+  helperPath: string
+): boolean {
+  if (document.contents === null) document.contents = document.createNode({})
+  if (!isMap(document.contents)) {
+    throw new Error('Cannot safely update Hermes settings whose root is not a mapping')
+  }
+
+  let hooks = document.get('hooks', true)
+  if (hooks === undefined) {
+    document.set('hooks', document.createNode({}))
+    hooks = document.get('hooks', true)
+  }
+  if (!isMap(hooks)) {
+    throw new Error('Cannot safely update Hermes settings whose hooks value is not a mapping')
+  }
+
+  let changed = false
+  for (const event of HERMES_HOOK_EVENTS) {
+    let entries = hooks.get(event, true)
+    if (entries === undefined) {
+      hooks.set(event, document.createNode([]))
+      entries = hooks.get(event, true)
+      changed = true
+    }
+    if (!isSeq(entries)) {
+      throw new Error(`Cannot safely update Hermes hook ${event} because it is not a sequence`)
+    }
+
+    const retained = entries.items.filter((entry) => !isQPetHermesHook(entry))
+    if (retained.length !== entries.items.length) changed = true
+    entries.items = retained
+    entries.add(document.createNode({
+      command: hermesCommandFor(helperPath),
+      timeout: 2
+    }))
+    changed = true
+  }
+  return changed
+}
+
+function removeQPetHermesHooks(document: ReturnType<typeof parseDocument>): boolean {
+  const hooks = document.get('hooks', true)
+  if (hooks === undefined) return false
+  if (!isMap(hooks)) {
+    throw new Error('Cannot safely update Hermes settings whose hooks value is not a mapping')
+  }
+
+  let changed = false
+  for (const event of HERMES_HOOK_EVENTS) {
+    const entries = hooks.get(event, true)
+    if (entries === undefined) continue
+    if (!isSeq(entries)) {
+      throw new Error(`Cannot safely update Hermes hook ${event} because it is not a sequence`)
+    }
+    const retained = entries.items.filter((entry) => !isQPetHermesHook(entry))
+    if (retained.length === entries.items.length) continue
+    changed = true
+    entries.items = retained
+    if (entries.items.length === 0) hooks.delete(event)
+  }
+  if (hooks.items.length === 0) document.delete('hooks')
+  return changed
+}
+
+async function updateHermesConfig(
+  path: string,
+  update: (document: ReturnType<typeof parseDocument>) => boolean,
+  date: Date
+): Promise<boolean> {
+  const { source, document } = await readHermesDocument(path)
+  if (!update(document)) return false
+
+  const contents = document.toString({ lineWidth: 0 })
+  if (contents === source || `${contents}\n` === source) return false
+  await mkdir(dirname(path), { recursive: true, mode: 0o700 })
+  await backupIfPresent(path, date)
+  const mode = await existingMode(path, 0o600)
+  await atomicWrite(path, contents.endsWith('\n') ? contents : `${contents}\n`, mode)
+  return true
+}
+
 function updateHooksJsonc(source: string, current: JsonObject, next: JsonObject): string {
   const currentHooks = isObject(current.hooks) ? current.hooks : {}
   const nextHooks = isObject(next.hooks) ? next.hooks : {}
@@ -503,6 +652,38 @@ async function inspectCursorConfig(path: string): Promise<ConfigInspection> {
   }
 }
 
+async function inspectHermesConfig(
+  path: string,
+  helperPath: string
+): Promise<ConfigInspection> {
+  try {
+    const { document } = await readHermesDocument(path)
+    return { installed: hasQPetHermesHooks(document, helperPath) }
+  } catch (error) {
+    return {
+      installed: false,
+      error: error instanceof Error ? error.message : String(error)
+    }
+  }
+}
+
+async function hasHermesConsent(path: string, helperPath: string): Promise<boolean> {
+  try {
+    const parsed = JSON.parse(await readFile(path, 'utf8')) as unknown
+    if (!isObject(parsed) || !Array.isArray(parsed.approvals)) return false
+    const expectedCommand = hermesCommandFor(helperPath)
+    return HERMES_HOOK_EVENTS.every((event) =>
+      (parsed.approvals as unknown[]).some((approval) =>
+        isObject(approval) &&
+        approval.event === event &&
+        approval.command === expectedCommand
+      )
+    )
+  } catch {
+    return false
+  }
+}
+
 function unavailableDetail(
   provider: Provider,
   inspection: ConfigInspection,
@@ -516,12 +697,6 @@ function unavailableDetail(
   }
 }
 
-const PROVIDER_LABELS: Record<Provider, string> = {
-  codex: 'Codex',
-  claude: 'Claude Code',
-  cursor: 'Cursor'
-}
-
 function installMessage(targets: readonly Provider[]): string {
   const labels = targets.map((provider) => PROVIDER_LABELS[provider])
   const list =
@@ -530,10 +705,15 @@ function installMessage(targets: readonly Provider[]): string {
       : labels.length === 2
         ? `${labels[0]} and ${labels[1]}`
         : `${labels.slice(0, -1).join(', ')}, and ${labels.at(-1)}`
-  const trustHint = targets.includes('codex')
-    ? ' Review and trust the Codex hooks with /hooks.'
-    : ''
-  return `QPet hooks installed for ${list}.${trustHint}`
+  const trustHints = [
+    targets.includes('codex')
+      ? 'Review and trust the ChatGPT integration hooks in Codex CLI with /hooks.'
+      : undefined,
+    targets.includes('hermes')
+      ? 'Restart Hermes and approve each QPet shell hook when prompted.'
+      : undefined
+  ].filter(Boolean).join(' ')
+  return `QPet hooks installed for ${list}.${trustHints ? ` ${trustHints}` : ''}`
 }
 
 export class IntegrationManager {
@@ -543,6 +723,8 @@ export class IntegrationManager {
   readonly codexHooksPath: string
   readonly claudeSettingsPath: string
   readonly cursorHooksPath: string
+  readonly hermesConfigPath: string
+  readonly hermesAllowlistPath: string
 
   private readonly helperSourcePath: string
   private readonly options: IntegrationManagerOptions
@@ -563,6 +745,13 @@ export class IntegrationManager {
     )
     this.cursorHooksPath = resolve(
       options.cursorHooksPath ?? join(this.homeDir, '.cursor', 'hooks.json')
+    )
+    this.hermesConfigPath = resolve(
+      options.hermesConfigPath ?? join(this.homeDir, '.hermes', 'config.yaml')
+    )
+    this.hermesAllowlistPath = resolve(
+      options.hermesAllowlistPath ??
+        join(this.homeDir, '.hermes', 'shell-hooks-allowlist.json')
     )
     this.helperSourcePath = resolve(
       options.helperSourcePath ?? join(process.cwd(), 'resources', QPET_HELPER_NAME)
@@ -585,7 +774,9 @@ export class IntegrationManager {
   private configPathFor(provider: Provider): string {
     if (provider === 'codex') return this.codexHooksPath
     if (provider === 'claude') return this.claudeSettingsPath
-    return this.cursorHooksPath
+    if (provider === 'cursor') return this.cursorHooksPath
+    if (provider === 'hermes') return this.hermesConfigPath
+    throw new Error('ClaudeClaw uses the Claude Code hook configuration')
   }
 
   private async hasTrustMarker(): Promise<boolean> {
@@ -623,12 +814,27 @@ export class IntegrationManager {
   }
 
   async getStatus(): Promise<IntegrationStatus> {
-    const [codexInspection, claudeInspection, cursorInspection, binaries, trusted] = await Promise.all([
+    const claudeClawWorkspaces = this.options.claudeClawWorkspaces
+      ? this.options.claudeClawWorkspaces().catch(() => [])
+      : Promise.resolve([])
+    const [
+      codexInspection,
+      claudeInspection,
+      cursorInspection,
+      hermesInspection,
+      binaries,
+      trusted,
+      hermesTrusted,
+      clawWorkspaces
+    ] = await Promise.all([
       inspectConfig(this.codexHooksPath, CODEX_HOOK_EVENTS),
       inspectConfig(this.claudeSettingsPath, CLAUDE_HOOK_EVENTS),
       inspectCursorConfig(this.cursorHooksPath),
+      inspectHermesConfig(this.hermesConfigPath, this.helperPath),
       this.binaries(),
-      this.hasTrustMarker()
+      this.hasTrustMarker(),
+      hasHermesConsent(this.hermesAllowlistPath, this.helperPath),
+      claudeClawWorkspaces
     ])
     const listenerActive = this.options.isListenerActive?.() ?? false
 
@@ -647,7 +853,11 @@ export class IntegrationManager {
       }
 
       if (!binary) {
-        return unavailableDetail(provider, inspection, `${provider} executable was not found`)
+        return unavailableDetail(
+          provider,
+          inspection,
+          `${PROVIDER_LABELS[provider]} executable was not found`
+        )
       }
 
       if (!binary.capabilities.hooks) {
@@ -687,7 +897,19 @@ export class IntegrationManager {
           binaryPath: binary.path,
           version: binary.version,
           message:
-            'Waiting for the first trusted Codex event. In a new Codex CLI session, trust QPet in /hooks if prompted, then send a prompt.'
+            'Waiting for the first trusted ChatGPT event. In a new Codex CLI session, trust QPet in /hooks if prompted, then send a prompt.'
+        }
+      }
+
+      if (provider === 'hermes' && !hermesTrusted) {
+        return {
+          provider,
+          installed: true,
+          health: 'awaiting_trust',
+          binaryPath: binary.path,
+          version: binary.version,
+          message:
+            'Restart Hermes and approve each QPet shell hook when prompted. QPet never edits the Hermes consent allowlist.'
         }
       }
 
@@ -705,10 +927,65 @@ export class IntegrationManager {
       }
     }
 
+    const claudeClawDetail = (): IntegrationDetail => {
+      const provider = 'claudeclaw' as const
+      if (clawWorkspaces.length === 0) {
+        return {
+          provider,
+          installed: false,
+          health: 'unavailable',
+          message: 'No ClaudeClaw workspace was detected.'
+        }
+      }
+      if (claudeInspection.error) {
+        return {
+          provider,
+          installed: false,
+          health: 'error',
+          message: claudeInspection.error
+        }
+      }
+      if (!claudeInspection.installed && !binaries.claude?.capabilities.hooks) {
+        return {
+          provider,
+          installed: false,
+          health: 'unavailable',
+          message: 'ClaudeClaw was detected, but compatible Claude Code hooks are unavailable.'
+        }
+      }
+      if (!claudeInspection.installed) {
+        return {
+          provider,
+          installed: false,
+          health: 'not_installed',
+          message: `${clawWorkspaces.length} ClaudeClaw workspace${clawWorkspaces.length === 1 ? '' : 's'} detected.`
+        }
+      }
+      if (!listenerActive) {
+        return {
+          provider,
+          installed: true,
+          health: 'error',
+          message: 'QPet’s local event listener is unavailable. Restart QPet before using hooks.'
+        }
+      }
+      const running = clawWorkspaces.filter((workspace) => workspace.running).length
+      return {
+        provider,
+        installed: true,
+        health: 'healthy',
+        message:
+          `${clawWorkspaces.length} workspace${clawWorkspaces.length === 1 ? '' : 's'} detected` +
+          `${running > 0 ? ` · ${running} daemon${running === 1 ? '' : 's'} running` : ''}.`
+      }
+    }
+
     return {
       codex: detail('codex', codexInspection, binaries.codex),
       claude: detail('claude', claudeInspection, binaries.claude),
       cursor: detail('cursor', cursorInspection, binaries.cursor),
+      hermes: detail('hermes', hermesInspection, binaries.hermes),
+      claudeclaw: claudeClawDetail(),
       listenerActive,
       ...(
         listenerActive
@@ -726,35 +1003,43 @@ export class IntegrationManager {
     return this.serialized(async () => {
       try {
         const binaries = await this.binaries()
-        const targets = (['codex', 'claude', 'cursor'] as const).filter(
+        const targets = (['codex', 'claude', 'cursor', 'hermes'] as const).filter(
           (provider) => binaries[provider]?.capabilities.hooks
         )
         if (targets.length === 0) {
           return {
             ok: false,
             message:
-              'No supported Codex, Claude Code, or Cursor CLI was found. Install a provider, then Refresh.',
+              'No supported ChatGPT (Codex CLI), Claude Code, Cursor, or Hermes CLI was found. Install a provider, then Refresh.',
             status: await this.getStatus()
           }
         }
 
         // Validate only the configs we will touch so an unused invalid file
         // cannot block installing for a detected provider.
-        await Promise.all(
-          targets.map((provider) => readJsonObject(this.configPathFor(provider)))
-        )
+        await Promise.all(targets.map((provider) =>
+          provider === 'hermes'
+            ? readHermesDocument(this.hermesConfigPath)
+            : readJsonObject(this.configPathFor(provider))
+        ))
         await this.copyHelper()
         const date = this.options.now?.() ?? new Date()
         let codexChanged = false
         for (const provider of targets) {
-          const changed = await updateConfig(
-            this.configPathFor(provider),
-            (config) =>
-              provider === 'cursor'
-                ? mergeQPetCursorHooks(config, this.helperPath)
-                : mergeQPetHooks(config, provider, this.helperPath),
-            date
-          )
+          const changed = provider === 'hermes'
+            ? await updateHermesConfig(
+                this.hermesConfigPath,
+                (document) => mergeQPetHermesHooks(document, this.helperPath),
+                date
+              )
+            : await updateConfig(
+                this.configPathFor(provider),
+                (config) =>
+                  provider === 'cursor'
+                    ? mergeQPetCursorHooks(config, this.helperPath)
+                    : mergeQPetHooks(config, provider, this.helperPath),
+                date
+              )
           if (provider === 'codex') codexChanged = changed
         }
 
@@ -780,12 +1065,14 @@ export class IntegrationManager {
         await Promise.all([
           readJsonObject(this.codexHooksPath),
           readJsonObject(this.claudeSettingsPath),
-          readJsonObject(this.cursorHooksPath)
+          readJsonObject(this.cursorHooksPath),
+          readHermesDocument(this.hermesConfigPath)
         ])
         const date = this.options.now?.() ?? new Date()
         await updateConfig(this.codexHooksPath, removeQPetHooks, date)
         await updateConfig(this.claudeSettingsPath, removeQPetHooks, date)
         await updateConfig(this.cursorHooksPath, removeQPetCursorHooks, date)
+        await updateHermesConfig(this.hermesConfigPath, removeQPetHermesHooks, date)
         await Promise.all([
           unlink(this.helperPath).catch(() => undefined),
           unlink(this.trustedMarkerPath()).catch(() => undefined)

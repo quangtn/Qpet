@@ -130,6 +130,11 @@ describe.runIf(process.platform === 'darwin')('qpet-hook helper', () => {
     const cursorRun = await invokeHelper(supportDir, 'cursor', '{"conversation_id":"cursor-1"}')
     expect(cursorRun.code).toBe(0)
     expect((await cursorRequest).headers['x-qpet-provider']).toBe('cursor')
+
+    const hermesRequest = local.nextRequest()
+    const hermesRun = await invokeHelper(supportDir, 'hermes', '{"session_id":"hermes-1"}')
+    expect(hermesRun.code).toBe(0)
+    expect((await hermesRequest).headers['x-qpet-provider']).toBe('hermes')
   })
 
   it('rejects stdin larger than 256 KiB without contacting the listener', async () => {

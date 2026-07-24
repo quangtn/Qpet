@@ -11,7 +11,7 @@ import type {
 const activityIdSchema = z.string().min(1).max(512)
 const sessionActionSchema = z.object({
   activityId: activityIdSchema,
-  action: z.enum(['open_project', 'attach', 'resume', 'copy_command'])
+  action: z.enum(['open_project', 'open_provider', 'attach', 'resume', 'copy_command'])
 })
 const settingsPatchSchema = z
   .object({
@@ -31,7 +31,7 @@ const screenPointSchema = z
     y: z.number().finite().min(-10_000_000).max(10_000_000)
   })
   .strict()
-const providerSchema = z.enum(['codex', 'claude', 'cursor'])
+const providerSchema = z.enum(['codex', 'claude', 'cursor', 'hermes', 'claudeclaw'])
 const soundTriggerSchema = z.enum(['needs_input', 'blocked', 'ready'])
 const dictationActionSchema = z.enum(['copy', 'retry', 'cancel'])
 const dictationTextSchema = z.string().max(64 * 1024)

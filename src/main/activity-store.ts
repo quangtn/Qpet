@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto'
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 
 import type { Activity, PetState, Provider } from '../shared/contracts'
 import { projectNameFor } from '../shared/activity'
@@ -225,7 +225,7 @@ export class ActivityStore {
       const mutations: ActivityMutation[] = []
 
       for (const observation of observations) {
-        const id = activityId('claude', observation.sessionId)
+        const id = activityId(observation.provider, observation.sessionId)
         const previous = nextActivities.get(id)
         const next = activityFromObservation(observation, previous, this.claudeIdleAfterMs)
         if (!next) continue
@@ -241,18 +241,20 @@ export class ActivityStore {
       }
 
       for (const sessionId of missingSessionIds) {
-        const id = activityId('claude', sessionId)
-        const previous = nextActivities.get(id)
-        if (!previous?.live) continue
+        for (const provider of ['claude', 'claudeclaw'] as const) {
+          const id = activityId(provider, sessionId)
+          const previous = nextActivities.get(id)
+          if (!previous?.live) continue
 
-        const next = closeMissingClaudeActivity(previous, this.now())
-        nextActivities.set(id, next)
-        mutations.push({
-          changed: true,
-          duplicate: false,
-          activity: cloneActivity(next),
-          previous: cloneActivity(previous)
-        })
+          const next = closeMissingClaudeActivity(previous, this.now())
+          nextActivities.set(id, next)
+          mutations.push({
+            changed: true,
+            duplicate: false,
+            activity: cloneActivity(next),
+            previous: cloneActivity(previous)
+          })
+        }
       }
 
       if (mutations.length === 0) return mutations
@@ -265,6 +267,43 @@ export class ActivityStore {
         previous: last.previous
       })
       return mutations
+    })
+  }
+
+  async reclassifyClaudeActivities(workspaceRoots: readonly string[]): Promise<number> {
+    const roots = workspaceRoots
+      .filter((root) => isAbsolute(root) && !root.includes('\0'))
+      .map((root) => resolve(root))
+    if (roots.length === 0) return 0
+
+    return this.enqueue(async () => {
+      const nextActivities = new Map(this.activities)
+      let changed = 0
+
+      for (const [id, activity] of this.activities) {
+        if (
+          activity.provider !== 'claude' ||
+          !roots.some((root) => pathContains(root, activity.cwd))
+        ) continue
+
+        const nextId = activityId('claudeclaw', activity.sessionId)
+        const relabeled: Activity = {
+          ...activity,
+          id: nextId,
+          provider: 'claudeclaw',
+          summary: activity.summary.replace(/^Claude\b/, 'ClaudeClaw')
+        }
+        const existing = nextActivities.get(nextId)
+        const winner = existing ? sortActivities([existing, relabeled])[0] : relabeled
+        nextActivities.delete(id)
+        nextActivities.set(nextId, { ...winner, id: nextId, provider: 'claudeclaw' })
+        changed += 1
+      }
+
+      if (changed === 0) return 0
+      await this.commit(nextActivities)
+      this.emit({ activities: this.getActivities() })
+      return changed
     })
   }
 
@@ -459,7 +498,7 @@ export function shouldExpire(
 ): boolean {
   const age = Math.max(0, now - activity.updatedAt)
   if (
-    activity.provider === 'codex' &&
+    (activity.provider === 'codex' || activity.provider === 'hermes') &&
     (activity.state === 'running' || activity.state === 'needs_input')
   ) {
     return age >= codexStaleAfterMs
@@ -580,13 +619,17 @@ function activityFromObservation(
     observation.observedAt - previous.updatedAt >= idleAfterMs
   const state = quietLiveSession ? 'ready' : (observation.state ?? previous?.state ?? 'running')
   const summary = quietLiveSession
-    ? 'Claude session idle'
-    : (observation.summary ?? previous?.summary ?? 'Claude session active')
+    ? `${observation.provider === 'claudeclaw' ? 'ClaudeClaw' : 'Claude'} session idle`
+    : (
+        observation.summary ??
+        previous?.summary ??
+        `${observation.provider === 'claudeclaw' ? 'ClaudeClaw' : 'Claude'} session active`
+      )
   const stateChanged = previous ? state !== previous.state || summary !== previous.summary : true
 
   return toPersistedActivity({
-    id: activityId('claude', observation.sessionId),
-    provider: 'claude',
+    id: activityId(observation.provider, observation.sessionId),
+    provider: observation.provider,
     sessionId: observation.sessionId,
     cwd: observation.cwd,
     projectName: projectNameFor(observation.cwd),
@@ -610,7 +653,9 @@ function closeMissingClaudeActivity(previous: Activity, now: number): Activity {
     ...previous,
     state: preserveFailure ? 'blocked' : 'ready',
     summary:
-      preserveFailure || preserveCompletion ? previous.summary : 'Claude session ended',
+      preserveFailure || preserveCompletion
+        ? previous.summary
+        : `${previous.provider === 'claudeclaw' ? 'ClaudeClaw' : 'Claude'} session ended`,
     updatedAt: now,
     live: false,
     unread: preserveCompletion || preserveFailure ? previous.unread : true
@@ -635,7 +680,13 @@ function validateStoredActivity(value: unknown): Activity | null {
   const updatedAt = input.updatedAt
 
   if (
-    (provider !== 'codex' && provider !== 'claude' && provider !== 'cursor') ||
+    (
+      provider !== 'codex' &&
+      provider !== 'claude' &&
+      provider !== 'cursor' &&
+      provider !== 'hermes' &&
+      provider !== 'claudeclaw'
+    ) ||
     !isPetState(state) ||
     !sessionId ||
     !cwd ||
@@ -713,4 +764,10 @@ function equalActivity(left: Activity, right: Activity): boolean {
 
 function cloneActivity(activity: Activity): Activity {
   return { ...activity }
+}
+
+function pathContains(root: string, candidate: string): boolean {
+  if (!isAbsolute(candidate)) return false
+  const child = relative(root, resolve(candidate))
+  return child === '' || (!child.startsWith('..') && !isAbsolute(child))
 }

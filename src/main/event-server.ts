@@ -257,13 +257,21 @@ function providerForRequest(request: IncomingMessage): Provider | null {
   if (pathname === '/v1/events/codex') return 'codex'
   if (pathname === '/v1/events/claude') return 'claude'
   if (pathname === '/v1/events/cursor') return 'cursor'
+  if (pathname === '/v1/events/hermes') return 'hermes'
+  if (pathname === '/v1/events/claudeclaw') return 'claudeclaw'
 
   // Compatibility route used by the fixed helper. The provider header is
   // accepted only on the exact local endpoint, never as an arbitrary value.
   if (pathname === '/events') {
     const header = request.headers['x-qpet-provider']
     const value = Array.isArray(header) ? header[0] : header
-    if (value === 'codex' || value === 'claude' || value === 'cursor') return value
+    if (
+      value === 'codex' ||
+      value === 'claude' ||
+      value === 'cursor' ||
+      value === 'hermes' ||
+      value === 'claudeclaw'
+    ) return value
   }
   return null
 }

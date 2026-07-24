@@ -6,6 +6,8 @@ import { execFile } from 'node:child_process'
 
 import type { Provider } from '../shared/contracts'
 
+export type BinaryProvider = Exclude<Provider, 'claudeclaw'>
+
 export interface BinaryCapabilities {
   hooks: boolean
   agentsJson: boolean
@@ -14,7 +16,7 @@ export interface BinaryCapabilities {
 }
 
 export interface DiscoveredBinary {
-  provider: Provider
+  provider: BinaryProvider
   path: string
   version?: string
   capabilities: BinaryCapabilities
@@ -119,7 +121,7 @@ async function binarySearchDirectories(options: BinaryDiscoveryOptions): Promise
 }
 
 async function findBinary(
-  provider: Provider,
+  provider: BinaryProvider,
   options: BinaryDiscoveryOptions
 ): Promise<string | undefined> {
   const directories = await binarySearchDirectories(options)
@@ -258,8 +260,45 @@ async function inspectCursor(
   }
 }
 
+async function inspectHermes(
+  path: string,
+  runner: CommandRunner,
+  timeoutMs: number
+): Promise<DiscoveredBinary> {
+  let version: string | undefined
+  let hooks = false
+  let resume = false
+
+  try {
+    version = firstOutputLine(await runner(path, ['--version'], timeoutMs))
+  } catch {
+    // Keep the executable available while capability probes fail closed.
+  }
+
+  try {
+    const result = await runner(path, ['hooks', '--help'], timeoutMs)
+    hooks = /\bhooks\b/i.test(`${result.stdout}\n${result.stderr}`)
+  } catch {
+    hooks = false
+  }
+
+  try {
+    const result = await runner(path, ['--help'], timeoutMs)
+    resume = /--resume\b/.test(`${result.stdout}\n${result.stderr}`)
+  } catch {
+    resume = false
+  }
+
+  return {
+    provider: 'hermes',
+    path,
+    version,
+    capabilities: { ...EMPTY_CAPABILITIES, hooks, resume }
+  }
+}
+
 export async function discoverBinary(
-  provider: Provider,
+  provider: BinaryProvider,
   options: BinaryDiscoveryOptions = {}
 ): Promise<DiscoveredBinary | undefined> {
   const path = await findBinary(provider, options)
@@ -269,21 +308,24 @@ export async function discoverBinary(
   const timeoutMs = options.timeoutMs ?? 2_500
   if (provider === 'codex') return inspectCodex(path, runner, timeoutMs)
   if (provider === 'claude') return inspectClaude(path, runner, timeoutMs)
-  return inspectCursor(path, runner, timeoutMs)
+  if (provider === 'cursor') return inspectCursor(path, runner, timeoutMs)
+  return inspectHermes(path, runner, timeoutMs)
 }
 
 export async function discoverBinaries(
   options: BinaryDiscoveryOptions = {}
 ): Promise<Partial<Record<Provider, DiscoveredBinary>>> {
-  const [codex, claude, cursor] = await Promise.all([
+  const [codex, claude, cursor, hermes] = await Promise.all([
     discoverBinary('codex', options),
     discoverBinary('claude', options),
-    discoverBinary('cursor', options)
+    discoverBinary('cursor', options),
+    discoverBinary('hermes', options)
   ])
 
   return {
     ...(codex ? { codex } : {}),
     ...(claude ? { claude } : {}),
-    ...(cursor ? { cursor } : {})
+    ...(cursor ? { cursor } : {}),
+    ...(hermes ? { hermes } : {})
   }
 }

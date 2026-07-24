@@ -2,7 +2,7 @@
   "name": "qpet",
   "version": "0.1.0",
   "private": true,
-  "description": "A floating macOS companion for Codex, Claude Code, and Cursor activity",
+  "description": "A floating macOS companion for ChatGPT, Claude Code, Cursor, Hermes, and ClaudeClaw activity",
   "type": "module",
   "main": "out/main/index.js",
   "author": "Quang Nguyen <quangtn@gmail.com>",
@@ -25,6 +25,7 @@
   },
   "dependencies": {
     "jsonc-parser": "3.3.1",
+    "yaml": "2.8.1",
     "zod": "4.4.3"
   },
   "devDependencies": {

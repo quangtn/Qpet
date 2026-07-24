@@ -54,8 +54,11 @@ export function formatRelativeTime(timestamp: number, now = Date.now()): string 
 }
 
 export function sessionActions(activity: Activity): Array<
-  'open_project' | 'attach' | 'resume' | 'copy_command'
+  'open_project' | 'open_provider' | 'attach' | 'resume' | 'copy_command'
 > {
+  if (activity.provider === 'claudeclaw') {
+    return ['open_provider', 'open_project', 'copy_command']
+  }
   if (!activity.live) {
     return activity.provider === 'cursor'
       ? ['open_project', 'copy_command']

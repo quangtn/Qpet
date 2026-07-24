@@ -17,7 +17,7 @@ const emptySnapshot: AppSnapshot = {
       provider: 'codex',
       health: 'unavailable',
       installed: false,
-      message: 'Checking Codex…'
+      message: 'Checking ChatGPT…'
     },
     claude: {
       provider: 'claude',
@@ -30,6 +30,18 @@ const emptySnapshot: AppSnapshot = {
       health: 'unavailable',
       installed: false,
       message: 'Checking Cursor…'
+    },
+    hermes: {
+      provider: 'hermes',
+      health: 'unavailable',
+      installed: false,
+      message: 'Checking Hermes…'
+    },
+    claudeclaw: {
+      provider: 'claudeclaw',
+      health: 'unavailable',
+      installed: false,
+      message: 'Checking ClaudeClaw…'
     }
   },
   settings: {

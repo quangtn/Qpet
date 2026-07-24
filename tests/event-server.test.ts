@@ -9,6 +9,7 @@ import {
   EventServer,
   type ProviderEventHandler
 } from '../src/main/event-server'
+import type { Provider } from '../src/shared/contracts'
 
 const servers: EventServer[] = []
 const directories: string[] = []
@@ -33,7 +34,7 @@ async function makeServer(handler: ProviderEventHandler = vi.fn()): Promise<{
   return { server, baseUrl: endpoint.baseUrl, token, directory }
 }
 
-function post(baseUrl: string, provider: 'codex' | 'claude' | 'cursor', token: string, body: string) {
+function post(baseUrl: string, provider: Provider, token: string, body: string) {
   return fetch(`${baseUrl}/v1/events/${provider}`, {
     method: 'POST',
     headers: {
@@ -79,6 +80,17 @@ describe('EventServer', () => {
     )).status).toBe(204)
     expect(handler).toHaveBeenCalledWith('cursor', {
       conversation_id: 'cursor-one',
+      cwd: '/tmp/project'
+    })
+
+    expect((await post(
+      baseUrl,
+      'hermes',
+      token,
+      JSON.stringify({ session_id: 'hermes-one', cwd: '/tmp/project' })
+    )).status).toBe(204)
+    expect(handler).toHaveBeenCalledWith('hermes', {
+      session_id: 'hermes-one',
       cwd: '/tmp/project'
     })
   })

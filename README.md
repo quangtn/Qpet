@@ -1,16 +1,16 @@
 # QPet
 
-QPet is a small, floating macOS companion for local Codex, Claude Code, and Cursor work. It turns coding-session lifecycle events into a tiny robot with an activity tray, without reading or storing prompts, transcripts, commands, or full assistant responses.
+QPet is a small, floating macOS companion for local ChatGPT (via Codex CLI), Claude Code, Cursor, Hermes, and ClaudeClaw work. It turns coding-session lifecycle events into a tiny robot with an activity tray, without reading or storing prompts, transcripts, commands, or full assistant responses.
 
 QPet is open source under the [MIT License](LICENSE). It is a personal, local-first app: no account, cloud service, or telemetry is required.
 
 <p align="center">
-  <img src="docs/screenshots/qpet-working.png" alt="QPet showing active Codex, Claude, and Cursor sessions" width="404">
+  <img src="docs/screenshots/qpet-working.png" alt="QPet showing active ChatGPT, Claude, and Cursor sessions" width="404">
 </p>
 
 ## V0 behavior
 
-- Watches new Codex, Claude Code, and Cursor sessions through user-level lifecycle hooks.
+- Watches new ChatGPT/Codex CLI, Claude Code, Cursor, and Hermes sessions through user-level lifecycle hooks, and identifies ClaudeClaw sessions within detected ClaudeClaw workspaces.
 - Reconciles live Claude sessions with `claude agents --json`.
 - Prioritizes pet activity as: **needs input → blocked → working → ready → idle**.
 - Lets users choose between the original Classic pixel pet and the smooth canonical Qmini theme in Settings.
@@ -35,11 +35,11 @@ triggers, and other QPet preferences.
 
 ### Activity tray
 
-Review prioritized Codex, Claude Code, and Cursor sessions, then open, resume,
+Review prioritized sessions from all supported providers, then open, resume,
 copy, or dismiss an activity from one compact list.
 
 <p align="center">
-  <img src="docs/screenshots/qpet-activity-tray.png" alt="QPet activity tray showing Codex and Claude Code sessions with safe actions" width="560">
+  <img src="docs/screenshots/qpet-activity-tray.png" alt="QPet activity tray showing ChatGPT and Claude Code sessions with safe actions" width="560">
 </p>
 
 ## Install from source
@@ -50,7 +50,7 @@ Requirements on the current target machine:
 - Node.js 22+
 - npm
 - Xcode Command Line Tools (`xcode-select --install`) to compile the local dictation helper
-- Optional: Codex CLI, Claude Code, and/or Cursor. QPet can be installed without all three;
+- Optional: Codex CLI, Claude Code, Cursor, Hermes, and/or ClaudeClaw. QPet can be installed without them;
   its onboarding reports each integration's availability.
 
 ```bash
@@ -63,8 +63,8 @@ npm run install:mac
 
 Keep the source checkout in a stable writable folder such as `~/Developer/qpet`;
 use it later to update QPet. The installer builds an arm64 `QPet.app`, installs
-it in `~/Applications` by default, and opens it. It does **not** modify Codex or
-Claude, or Cursor configuration.
+it in `~/Applications` by default, and opens it. It does **not** modify provider
+configuration.
 
 ### First launch
 
@@ -74,7 +74,8 @@ Claude, or Cursor configuration.
    providers.
 3. In a new Codex CLI session, run `/hooks` and explicitly approve the QPet
    hook definition when prompted.
-4. Start a new Codex CLI, Claude Code, or Cursor task and confirm QPet shows activity.
+4. If Hermes was detected, restart it and approve each QPet shell hook when prompted.
+5. Start a new supported task and confirm QPet shows activity.
 
 `npm run doctor` is a read-only preflight. It checks the supported Mac and
 Node.js version, detects optional provider CLIs, and reports QPet's app, data,
@@ -93,7 +94,7 @@ prompt:
 
 > Read `README.md` and `AGENTS.md`. Run `npm run doctor`, then verify the
 > prerequisites. Run `npm ci`, `npm run typecheck`, `npm test`, and
-> `npm run install:mac`. Do not edit `~/.codex`, `~/.claude`, or `~/.cursor`
+> `npm run install:mac`. Do not edit `~/.codex`, `~/.claude`, `~/.cursor`, or `~/.hermes`
 > directly; leave integration installation for QPet's interactive Settings
 > screen. Report any failed command with its exact output.
 
@@ -134,11 +135,16 @@ Open QPet Settings and choose **Install integrations**. QPet will:
 
 1. Install a fail-open relay under `~/Library/Application Support/QPet/`.
 2. Merge its handlers into the hook configs for **detected** provider CLIs
-   (`~/.codex/hooks.json`, `~/.claude/settings.json`, and/or `~/.cursor/hooks.json`).
+   (`~/.codex/hooks.json`, `~/.claude/settings.json`, `~/.cursor/hooks.json`,
+   and/or `~/.hermes/config.yaml`).
 3. Create timestamped, permission-preserving sidecar backups of changed files.
 4. Leave `~/.codex/config.toml` untouched, including existing `notify` commands.
 
 Codex requires explicit hook trust. After installation, open `/hooks` in a new Codex session and approve the QPet hook definition. QPet never bypasses this trust check.
+
+Hermes separately approves every `(event, command)` shell-hook pair. Restart Hermes after installation and approve the four QPet hooks when prompted. QPet reads consent status but never edits `~/.hermes/shell-hooks-allowlist.json`.
+
+ClaudeClaw uses the existing Claude Code hook integration. QPet detects its workspaces and daemon state without reading ClaudeClaw tokens, logs, sessions, prompts, or transcripts. Claude Code sessions launched inside a detected ClaudeClaw workspace are labeled ClaudeClaw.
 
 Uninstalling integrations removes only handlers whose command points to QPet's installed relay. Hooks fail open within one second when QPet is not running.
 
@@ -187,10 +193,14 @@ Run `npm run doctor` first; it prints the next action without changing anything.
   and choose **Open** once.
 - **Codex stays “Awaiting trust”:** start a new Codex CLI session, run
   `/hooks`, approve QPet, then submit one prompt while QPet is running.
+- **Hermes stays “Awaiting trust”:** restart Hermes and approve each QPet
+  shell hook when prompted, then use **Refresh** in QPet Settings.
+- **ClaudeClaw is not detected:** confirm its workspace contains
+  `.claude/claudeclaw/` or has a `com.claudeclaw.*.plist` LaunchAgent, then use **Refresh**.
 - **A provider is not detected:** confirm `command -v codex`,
-  `command -v claude`, or `command -v cursor` succeeds in Terminal, then use **Refresh** in QPet
+  `command -v claude`, `command -v cursor`, or `command -v hermes` succeeds in Terminal, then use **Refresh** in QPet
   Settings.
-- **QPet shows no activity:** only new Codex CLI, Claude Code, or Cursor sessions that emit
+- **QPet shows no activity:** only new supported sessions that emit
   hooks are visible. Recheck hook status with `npm run doctor`, then start a
   new CLI task.
 - **Need a clean removal:** choose **Remove integrations** in QPet Settings
@@ -199,7 +209,7 @@ Run `npm run doctor` first; it prints the next action without changing anything.
 ## Uninstall
 
 First open QPet Settings and choose **Remove integrations**. This removes only
-QPet-owned handlers while preserving every unrelated Codex, Claude, and Cursor setting.
+QPet-owned handlers while preserving every unrelated Codex CLI, Claude, Cursor, and Hermes setting.
 Then remove the app:
 
 ```bash
@@ -207,7 +217,7 @@ npm run uninstall:mac
 ```
 
 The uninstall script removes only the installed `QPet.app`; it deliberately
-does not touch `~/.codex`, `~/.claude`, `~/.cursor`, or QPet activity data. To remove QPet's
+does not touch `~/.codex`, `~/.claude`, `~/.cursor`, `~/.hermes`, or QPet activity data. To remove QPet's
 local metadata after integrations are removed, run:
 
 ```bash
@@ -218,7 +228,7 @@ npm run uninstall:mac -- --purge-data
 
 QPet listens only on an ephemeral `127.0.0.1` port. Each launch rotates a random bearer token stored in a mode-`0600` file. Incoming payloads are capped at 256 KiB and reduced immediately to normalized session metadata.
 
-Persisted activity contains only provider, session ID, project path/name, generic state/summary, timestamps, unread/live flags, and an optional Claude background-job ID. Raw hook bodies are never written to disk.
+Persisted activity contains only provider, session ID, project path/name, generic state/summary, timestamps, unread/live flags, and an optional Claude background-job ID. ClaudeClaw discovery reads only workspace markers, daemon PID, and safe loopback web status; it never reads the dashboard token or private logs. Raw hook bodies are never written to disk.
 
 This protects against accidental persistence and network exposure; it is not a hard boundary against another process already running as the same macOS user.
 

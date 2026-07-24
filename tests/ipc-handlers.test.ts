@@ -22,6 +22,9 @@ describe('IPC input schemas', () => {
     expect(
       parseSessionAction({ activityId: 'claude:1', action: 'open_project' })
     ).toEqual({ activityId: 'claude:1', action: 'open_project' })
+    expect(
+      parseSessionAction({ activityId: 'claudeclaw:1', action: 'open_provider' })
+    ).toEqual({ activityId: 'claudeclaw:1', action: 'open_provider' })
     expect(() =>
       parseSessionAction({ activityId: 'claude:1', action: 'delete_all' })
     ).toThrow(ZodError)
@@ -48,6 +51,8 @@ describe('IPC input schemas', () => {
 
   it('parses providers', () => {
     expect(parseProvider('cursor')).toBe('cursor')
+    expect(parseProvider('hermes')).toBe('hermes')
+    expect(parseProvider('claudeclaw')).toBe('claudeclaw')
     expect(() => parseProvider('windsurf')).toThrow(ZodError)
   })
 

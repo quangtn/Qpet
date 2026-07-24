@@ -1,5 +1,12 @@
 import { useState } from 'react'
-import type { AppSettings, IntegrationDetail, PetTheme, Provider, SoundTrigger } from '@shared'
+import {
+  PROVIDER_LABELS,
+  type AppSettings,
+  type IntegrationDetail,
+  type PetTheme,
+  type Provider,
+  type SoundTrigger
+} from '@shared'
 import { Icon } from './icons'
 import { healthLabels } from './model'
 import type { QPetController } from './use-qpet'
@@ -25,7 +32,9 @@ export function Settings({
   const installed =
     snapshot.integrations.codex.installed ||
     snapshot.integrations.claude.installed ||
-    snapshot.integrations.cursor.installed
+    snapshot.integrations.cursor.installed ||
+    snapshot.integrations.hermes.installed ||
+    snapshot.integrations.claudeclaw.installed
 
   const install = async (): Promise<void> => {
     setBusy('install')
@@ -79,8 +88,8 @@ export function Settings({
           <p className="eyebrow">Your local coding companion</p>
           <h1>Meet QPet</h1>
           <p>
-            QPet watches Codex, Claude Code, and Cursor, then gives you a quiet nudge when a
-            session needs attention.
+            QPet watches ChatGPT, Claude Code, Cursor, Hermes, and ClaudeClaw, then gives you a
+            quiet nudge when a session needs attention.
           </p>
         </div>
 
@@ -111,6 +120,8 @@ export function Settings({
             codex={snapshot.integrations.codex}
             claude={snapshot.integrations.claude}
             cursor={snapshot.integrations.cursor}
+            hermes={snapshot.integrations.hermes}
+            claudeclaw={snapshot.integrations.claudeclaw}
             loading={loading}
           />
           {!snapshot.integrations.listenerActive ? (
@@ -274,6 +285,8 @@ export function Settings({
           <IntegrationCard detail={snapshot.integrations.codex} />
           <IntegrationCard detail={snapshot.integrations.claude} />
           <IntegrationCard detail={snapshot.integrations.cursor} />
+          <IntegrationCard detail={snapshot.integrations.hermes} />
+          <IntegrationCard detail={snapshot.integrations.claudeclaw} />
         </div>
 
         {!snapshot.integrations.listenerActive ? (
@@ -290,8 +303,18 @@ export function Settings({
           <div className="trust-notice" role="status">
             <span>!</span>
             <p>
-              Codex hooks are installed. In a new Codex CLI session, trust QPet in
+              ChatGPT integration hooks are installed. In a new Codex CLI session, trust QPet in
               <code>/hooks</code> if prompted, then send one prompt while QPet is running.
+            </p>
+          </div>
+        ) : null}
+
+        {snapshot.integrations.hermes.health === 'awaiting_trust' ? (
+          <div className="trust-notice" role="status">
+            <span>!</span>
+            <p>
+              Hermes hooks are installed. Restart Hermes and approve each QPet shell hook when
+              prompted. QPet does not edit Hermes’ consent allowlist.
             </p>
           </div>
         ) : null}
@@ -525,16 +548,20 @@ function IntegrationRows({
   codex,
   claude,
   cursor,
+  hermes,
+  claudeclaw,
   loading
 }: {
   codex: IntegrationDetail
   claude: IntegrationDetail
   cursor: IntegrationDetail
+  hermes: IntegrationDetail
+  claudeclaw: IntegrationDetail
   loading: boolean
 }): React.JSX.Element {
   return (
     <div className="integration-rows">
-      {[codex, claude, cursor].map((detail) => (
+      {[codex, claude, cursor, hermes, claudeclaw].map((detail) => (
         <div key={detail.provider}>
           <ProviderLogo provider={detail.provider} />
           <span>
@@ -581,9 +608,7 @@ function ProviderLogo({ provider }: { provider: Provider }): React.JSX.Element {
 }
 
 function providerName(provider: Provider): string {
-  if (provider === 'codex') return 'Codex'
-  if (provider === 'claude') return 'Claude Code'
-  return 'Cursor'
+  return PROVIDER_LABELS[provider]
 }
 
 function integrationDescription(detail: IntegrationDetail): string {
@@ -591,7 +616,7 @@ function integrationDescription(detail: IntegrationDetail): string {
     return detail.version ? `Connected · ${detail.version}` : 'Hooks are connected.'
   }
   if (detail.health === 'awaiting_trust') {
-    return 'Hooks installed; waiting for the first trusted Codex event.'
+    return 'Hooks installed; waiting for provider approval.'
   }
   if (detail.health === 'not_installed') return 'QPet hooks are not installed.'
   if (detail.health === 'unavailable') return 'Command-line tool was not detected.'

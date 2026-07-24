@@ -1,5 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { Activity, AppSnapshot, SessionAction } from '@shared'
+import {
+  PROVIDER_SHORT_LABELS,
+  type Activity,
+  type AppSnapshot,
+  type SessionAction
+} from '@shared'
 import { Icon } from './icons'
 import {
   formatRelativeTime,
@@ -14,6 +19,7 @@ const actionLabels: Record<SessionAction, string> = {
   attach: 'Attach',
   resume: 'Resume',
   open_project: 'Open',
+  open_provider: 'Dashboard',
   copy_command: 'Copy command'
 }
 
@@ -21,6 +27,7 @@ const actionIcons: Record<SessionAction, 'terminal' | 'arrow' | 'open' | 'copy'>
   attach: 'terminal',
   resume: 'arrow',
   open_project: 'open',
+  open_provider: 'open',
   copy_command: 'copy'
 }
 
@@ -198,7 +205,7 @@ function ActivityCard({
       </div>
       <div className="activity-row-actions" aria-label={`Actions for ${activity.projectName}`}>
         {actions.map((action) => {
-          const primary = action === 'resume' || action === 'attach'
+          const primary = action === 'resume' || action === 'attach' || action === 'open_provider'
           return (
             <button
               key={action}
@@ -237,9 +244,7 @@ function ProviderBadge({ provider }: { provider: Activity['provider'] }): React.
 }
 
 function providerName(provider: Activity['provider']): string {
-  if (provider === 'codex') return 'Codex'
-  if (provider === 'claude') return 'Claude'
-  return 'Cursor'
+  return PROVIDER_SHORT_LABELS[provider]
 }
 
 function ActivitySkeleton(): React.JSX.Element {
@@ -263,7 +268,7 @@ function EmptyActivity({ theme }: { theme: AppSnapshot['settings']['petTheme'] }
         <i>z</i>
       </span>
       <strong>All quiet</strong>
-      <p>Start a Codex, Claude Code, or Cursor session. QPet will keep watch.</p>
+      <p>Start a supported agent session. QPet will keep watch.</p>
     </div>
   )
 }

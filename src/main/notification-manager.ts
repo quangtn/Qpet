@@ -1,6 +1,6 @@
 import { Notification } from 'electron'
 import { spawn } from 'node:child_process'
-import type { Activity, SoundTrigger } from '@shared'
+import { PROVIDER_LABELS, type Activity, type SoundTrigger } from '@shared'
 
 const MACOS_SOUNDS: Readonly<Record<'attention' | 'ready', string>> = {
   attention: '/System/Library/Sounds/Glass.aiff',
@@ -80,14 +80,9 @@ export class NotificationManager {
         activity.state === 'needs_input'
           ? `${activity.projectName} needs input`
           : `${activity.projectName} is blocked`
-      const provider = activity.provider === 'codex'
-        ? 'Codex'
-        : activity.provider === 'claude'
-          ? 'Claude Code'
-          : 'Cursor'
       const notification = new Notification({
         title,
-        body: `${provider} · ${activity.summary}`,
+        body: `${PROVIDER_LABELS[activity.provider]} · ${activity.summary}`,
         silent: true
       })
       notification.on('click', this.onClick)

@@ -37,6 +37,9 @@ export interface ClaudePollerOptions {
   timeoutMs?: number
   now?: () => number
   runCommand?: ClaudeCommandRunner
+  classifyObservation?: (
+    observation: ClaudeAgentObservation
+  ) => Promise<ClaudeAgentObservation>
   onError?: (error: Error) => void
 }
 
@@ -55,6 +58,7 @@ export class ClaudePoller {
   private readonly timeoutMs: number
   private readonly now: () => number
   private readonly runCommand: ClaudeCommandRunner
+  private readonly classifyObservation?: ClaudePollerOptions['classifyObservation']
   private readonly onError?: (error: Error) => void
   private timer?: NodeJS.Timeout
   private inFlight?: Promise<ClaudePollResult>
@@ -77,6 +81,7 @@ export class ClaudePoller {
     this.timeoutMs = options.timeoutMs ?? CLAUDE_POLL_TIMEOUT_MS
     this.now = options.now ?? Date.now
     this.runCommand = options.runCommand ?? runClaudeCommand
+    this.classifyObservation = options.classifyObservation
     this.onError = options.onError
   }
 
@@ -119,14 +124,17 @@ export class ClaudePoller {
         this.timeoutMs
       )
       const pollTime = this.now()
-      const observations = parseClaudeAgentOutput(stdout, pollTime)
+      const parsedObservations = parseClaudeAgentOutput(stdout, pollTime)
+      const observations = this.classifyObservation
+        ? await Promise.all(parsedObservations.map(this.classifyObservation))
+        : parsedObservations
       const currentIds = new Set(observations.map((observation) => observation.sessionId))
       const missingSessionIds = new Set(
         [...this.observedSessionIds].filter((id) => !currentIds.has(id))
       )
       for (const activity of this.activityStore.getActivities?.() ?? []) {
         if (
-          activity.provider === 'claude' &&
+          (activity.provider === 'claude' || activity.provider === 'claudeclaw') &&
           activity.live &&
           !currentIds.has(activity.sessionId) &&
           pollTime - activity.updatedAt >= CLAUDE_RECONCILE_GRACE_MS

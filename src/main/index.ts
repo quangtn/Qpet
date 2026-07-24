@@ -17,6 +17,7 @@ import {
   type DiscoveredBinary
 } from './binary-discovery'
 import { ClaudePoller } from './claude-poller'
+import { ClaudeClawDiscovery } from './claudeclaw-discovery'
 import { EventServer } from './event-server'
 import { DictationManager } from './dictation-manager'
 import { IntegrationManager } from './integration-manager'
@@ -55,7 +56,7 @@ function unavailableStatus(listenerActive = false, listenerMessage?: string): In
       provider: 'codex',
       installed: false,
       health: 'unavailable',
-      message: 'Codex has not been checked yet.'
+      message: 'ChatGPT has not been checked yet.'
     },
     claude: {
       provider: 'claude',
@@ -68,6 +69,18 @@ function unavailableStatus(listenerActive = false, listenerMessage?: string): In
       installed: false,
       health: 'unavailable',
       message: 'Cursor has not been checked yet.'
+    },
+    hermes: {
+      provider: 'hermes',
+      installed: false,
+      health: 'unavailable',
+      message: 'Hermes has not been checked yet.'
+    },
+    claudeclaw: {
+      provider: 'claudeclaw',
+      installed: false,
+      health: 'unavailable',
+      message: 'ClaudeClaw has not been checked yet.'
     },
     listenerActive,
     ...(listenerActive || !listenerMessage ? {} : { listenerMessage })
@@ -85,6 +98,11 @@ async function bootstrap(): Promise<void> {
     }
   })
   await Promise.all([settingsStore.initialize(), activityStore.initialize()])
+  const claudeClawDiscovery = new ClaudeClawDiscovery({ homeDir })
+  const initialClaudeClawWorkspaces = await claudeClawDiscovery.refresh()
+  await activityStore.reclassifyClaudeActivities(
+    initialClaudeClawWorkspaces.map((workspace) => workspace.root)
+  )
   await activityStore.cleanup()
 
   let integrationManager: IntegrationManager | undefined
@@ -105,7 +123,8 @@ async function bootstrap(): Promise<void> {
   eventServer = new EventServer({
     supportDir,
     onEvent: async (provider, payload) => {
-      await activityStore.ingest(provider, payload)
+      const classifiedProvider = await claudeClawDiscovery.providerForEvent(provider, payload)
+      await activityStore.ingest(classifiedProvider, payload)
       if (
         provider === 'codex' &&
         integrationStatus.codex.health === 'awaiting_trust' &&
@@ -140,7 +159,8 @@ async function bootstrap(): Promise<void> {
     listenerMessage: () =>
       listenerError
         ? `QPet’s local event listener failed to start: ${listenerError}`
-        : undefined
+        : undefined,
+    claudeClawWorkspaces: () => claudeClawDiscovery.workspaces()
   })
   integrationStatus = await integrationManager.getStatus()
 
@@ -238,7 +258,14 @@ async function bootstrap(): Promise<void> {
   }
 
   const refreshBinariesAndStatus = async (): Promise<IntegrationStatus> => {
-    binaries = await discoverBinaries({ homeDir })
+    const [discoveredBinaries, workspaces] = await Promise.all([
+      discoverBinaries({ homeDir }),
+      claudeClawDiscovery.refresh()
+    ])
+    binaries = discoveredBinaries
+    await activityStore.reclassifyClaudeActivities(
+      workspaces.map((workspace) => workspace.root)
+    )
     integrationStatus = await integrationManager!.getStatus()
     await syncClaudePoller()
     publish()
@@ -266,6 +293,16 @@ async function bootstrap(): Promise<void> {
       claudePoller = new ClaudePoller({
         binaryPath: claude!.path,
         activityStore,
+        classifyObservation: async (observation) => {
+          const workspace = await claudeClawDiscovery.resolveWorkspace(observation.cwd)
+          return workspace
+            ? {
+                ...observation,
+                provider: 'claudeclaw',
+                summary: observation.summary?.replace(/^Claude\b/, 'ClaudeClaw')
+              }
+            : observation
+        },
         onError: (error) => console.warn('Claude session reconciliation failed.', error.message)
       })
       claudePoller.start()
@@ -284,10 +321,20 @@ async function bootstrap(): Promise<void> {
     performSessionAction: async (request: SessionActionRequest) => {
       const activity = activityStore.getActivity(request.activityId)
       if (!activity) return { ok: false, message: 'That activity is no longer available.' }
-      return performSessionAction(activity, request.action, { binaries })
+      return performSessionAction(activity, request.action, {
+        binaries,
+        resolveClaudeClaw: (cwd) => claudeClawDiscovery.resolveWorkspace(cwd)
+      })
     },
     installIntegrations: async () => {
-      binaries = await discoverBinaries({ homeDir })
+      const [discoveredBinaries, workspaces] = await Promise.all([
+        discoverBinaries({ homeDir }),
+        claudeClawDiscovery.refresh()
+      ])
+      binaries = discoveredBinaries
+      await activityStore.reclassifyClaudeActivities(
+        workspaces.map((workspace) => workspace.root)
+      )
       const result = await integrationManager!.install()
       integrationStatus = result.status
       if (result.ok) applyLoginItem(settingsStore.get().launchAtLogin)
@@ -307,7 +354,9 @@ async function bootstrap(): Promise<void> {
     beginPetDrag: (point) => windowManager?.beginPetDrag(point),
     movePetDrag: (point) => windowManager?.movePetDrag(point),
     endPetDrag: () => windowManager?.endPetDrag(),
-    openProviderApp,
+    openProviderApp: (provider) => openProviderApp(provider, {
+      preferredClaudeClaw: () => claudeClawDiscovery.preferredWorkspace()
+    }),
     playTestSound: (trigger) => playMacNotificationSound(trigger),
     toggleDictation: () => dictationManager?.toggle(),
     performDictationAction: (action, text) => dictationManager?.performAction(action, text),
@@ -327,7 +376,9 @@ async function bootstrap(): Promise<void> {
   if (
     integrationStatus.codex.installed ||
     integrationStatus.claude.installed ||
-    integrationStatus.cursor.installed
+    integrationStatus.cursor.installed ||
+    integrationStatus.hermes.installed ||
+    integrationStatus.claudeclaw.installed
   ) {
     applyLoginItem(settingsStore.get().launchAtLogin)
   } else if (process.env.QPET_SKIP_ONBOARDING !== '1') {

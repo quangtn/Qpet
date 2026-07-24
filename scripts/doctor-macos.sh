@@ -15,6 +15,7 @@ support_dir="$home_dir/Library/Application Support/QPet"
 codex_hooks="$home_dir/.codex/hooks.json"
 claude_settings="$home_dir/.claude/settings.json"
 cursor_hooks="$home_dir/.cursor/hooks.json"
+hermes_config="$home_dir/.hermes/config.yaml"
 
 echo "QPet doctor (read-only)"
 echo
@@ -62,13 +63,22 @@ else
   overall=1
 fi
 
-for provider in codex claude cursor; do
+for provider in codex claude cursor hermes; do
   if provider_path="$(command -v "$provider" 2>/dev/null)"; then
     print_result "$provider CLI" "FOUND" "$provider_path"
   else
     print_result "$provider CLI" "OPTIONAL" "Not found; QPet can still install without it."
   fi
 done
+
+shopt -s nullglob
+claudeclaw_agents=("$home_dir"/Library/LaunchAgents/com.claudeclaw.*.plist)
+shopt -u nullglob
+if ((${#claudeclaw_agents[@]} > 0)); then
+  print_result "ClaudeClaw" "FOUND" "${#claudeclaw_agents[@]} workspace LaunchAgent(s) detected."
+else
+  print_result "ClaudeClaw" "OPTIONAL" "No workspace LaunchAgent detected."
+fi
 
 if [[ -d "$app_path" ]]; then
   print_result "Installed app" "FOUND" "$app_path"
@@ -100,12 +110,18 @@ else
   print_result "Claude hooks" "NOT SET" "Use QPet Settings > Install integrations."
 fi
 
+if [[ -f "$hermes_config" ]] && grep -Fq 'QPET_HOOK_TAG=qpet-v1' "$hermes_config"; then
+  print_result "Hermes hooks" "FOUND" "QPet-owned handler detected."
+else
+  print_result "Hermes hooks" "NOT SET" "Use QPet Settings > Install integrations."
+fi
+
 echo
 if ((overall)); then
   echo "Next action: resolve each ERROR above, then run npm run doctor again."
 else
   echo "Next action: run npm ci, then npm run install:mac."
-  echo "After first launch, install integrations in QPet Settings and trust QPet with /hooks in a new Codex CLI session."
+  echo "After first launch, install integrations in QPet Settings, trust QPet with /hooks in Codex, and approve QPet hooks when Hermes restarts."
 fi
 
 exit "$overall"

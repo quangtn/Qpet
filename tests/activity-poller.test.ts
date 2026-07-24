@@ -117,6 +117,35 @@ describe('ClaudePoller', () => {
     expect(reconcileClaudeAgents).toHaveBeenCalledWith([], ['hook-only'])
   })
 
+  it('classifies ClaudeClaw observations before reconciliation', async () => {
+    const reconcileClaudeAgents = vi.fn(async () => undefined)
+    const poller = new ClaudePoller({
+      binaryPath: '/absolute/claude',
+      runCommand: async () => ({
+        stdout: JSON.stringify([{
+          sessionId: 'claw-session',
+          cwd: '/Users/test/assistants/claw',
+          kind: 'interactive',
+          state: 'working'
+        }])
+      }),
+      classifyObservation: async (observation) => ({
+        ...observation,
+        provider: 'claudeclaw',
+        summary: observation.summary?.replace(/^Claude\b/, 'ClaudeClaw')
+      }),
+      activityStore: { reconcileClaudeAgents }
+    })
+
+    await poller.pollNow()
+    expect(reconcileClaudeAgents).toHaveBeenCalledWith([
+      expect.objectContaining({
+        provider: 'claudeclaw',
+        summary: 'ClaudeClaw is working'
+      })
+    ], [])
+  })
+
   it('requires the capability-tested absolute Claude binary path', () => {
     expect(
       () =>

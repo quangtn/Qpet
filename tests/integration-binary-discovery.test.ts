@@ -32,6 +32,7 @@ describe('binary discovery', () => {
     const codexPath = await realpath(await fakeExecutable(bin, 'codex'))
     const claudePath = await realpath(await fakeExecutable(bin, 'claude'))
     const cursorPath = await realpath(await fakeExecutable(bin, 'cursor'))
+    const hermesPath = await realpath(await fakeExecutable(bin, 'hermes'))
 
     const runner: CommandRunner = vi.fn(async (executable, args) => {
       if (executable === codexPath && args[0] === '--version') {
@@ -60,6 +61,15 @@ describe('binary discovery', () => {
       }
       if (executable === cursorPath && args[0] === '--version') {
         return { stdout: '3.11.13\n', stderr: '' }
+      }
+      if (executable === hermesPath && args[0] === '--version') {
+        return { stdout: 'Hermes Agent v0.19.0\n', stderr: '' }
+      }
+      if (executable === hermesPath && args.join(' ') === 'hooks --help') {
+        return { stdout: 'Inspect and manage shell-script hooks\n', stderr: '' }
+      }
+      if (executable === hermesPath && args[0] === '--help') {
+        return { stdout: '  --resume SESSION\n', stderr: '' }
       }
       throw new Error(`unexpected command: ${executable} ${args.join(' ')}`)
     })
@@ -90,6 +100,11 @@ describe('binary discovery', () => {
       path: cursorPath,
       version: '3.11.13',
       capabilities: { hooks: true, resume: false }
+    })
+    expect(binaries.hermes).toMatchObject({
+      path: hermesPath,
+      version: 'Hermes Agent v0.19.0',
+      capabilities: { hooks: true, resume: true }
     })
     expect(runner).not.toHaveBeenCalledWith(cursorPath, ['agent', '--help'], expect.any(Number))
   })

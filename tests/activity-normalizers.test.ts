@@ -5,6 +5,7 @@ import {
   normalizeClaudeEvent,
   normalizeCodexEvent,
   normalizeCursorEvent,
+  normalizeHermesEvent,
   providerAdapters,
   sortActivities
 } from '../src/main/provider-normalizers'
@@ -92,6 +93,67 @@ describe('provider event normalizers', () => {
       inputRequests: false,
       reconciliation: 'inactivity'
     })
+    expect(providerAdapters.hermes.capabilities).toMatchObject({
+      inputRequests: true,
+      reconciliation: 'hook-stale'
+    })
+    expect(providerAdapters.claudeclaw.capabilities).toMatchObject({
+      authoritativePresence: true,
+      reconciliation: 'agents-json'
+    })
+  })
+
+  it('maps Hermes lifecycle events without retaining hook context', () => {
+    const base = {
+      session_id: 'hermes-1',
+      cwd: '/tmp/hermes-project',
+      tool_input: null
+    }
+    expect(normalizeHermesEvent({
+      ...base,
+      hook_event_name: 'pre_llm_call',
+      extra: { user_message: 'PRIVATE HERMES PROMPT' }
+    }, 10)).toMatchObject({
+      id: 'hermes:hermes-1',
+      provider: 'hermes',
+      state: 'running',
+      summary: 'Hermes is working',
+      updatedAt: 10
+    })
+    expect(normalizeHermesEvent({
+      ...base,
+      hook_event_name: 'pre_approval_request',
+      extra: { command: 'PRIVATE COMMAND' }
+    })).toMatchObject({
+      state: 'needs_input',
+      summary: 'Hermes needs approval'
+    })
+    expect(normalizeHermesEvent({
+      ...base,
+      hook_event_name: 'post_approval_response',
+      extra: { choice: 'deny' }
+    })).toMatchObject({ state: 'running' })
+    expect(normalizeHermesEvent({
+      ...base,
+      hook_event_name: 'on_session_end',
+      extra: { completed: true, interrupted: false, conversation_history: 'PRIVATE HISTORY' }
+    })).toMatchObject({ state: 'ready', summary: 'Hermes finished', live: false })
+    expect(normalizeHermesEvent({
+      ...base,
+      hook_event_name: 'on_session_end',
+      extra: { completed: false, interrupted: true }
+    })).toMatchObject({ state: 'ready', summary: 'Hermes stopped', unread: false, live: false })
+    const blocked = normalizeHermesEvent({
+      ...base,
+      hook_event_name: 'on_session_end',
+      extra: { completed: false, interrupted: false, error: 'PRIVATE ERROR' }
+    })
+    expect(blocked).toMatchObject({
+      state: 'blocked',
+      summary: 'Hermes could not finish',
+      live: false
+    })
+    expect(JSON.stringify(blocked)).not.toContain('PRIVATE')
   })
 
   it('maps Codex lifecycle events without retaining prompts or commands', () => {
@@ -113,7 +175,7 @@ describe('provider event normalizers', () => {
       sessionId: 'codex-1',
       projectName: 'secret-project',
       state: 'running',
-      summary: 'Codex is working',
+      summary: 'ChatGPT is working',
       updatedAt: 123,
       unread: false,
       live: true
@@ -129,7 +191,7 @@ describe('provider event normalizers', () => {
         hook_event_name: 'PermissionRequest',
         tool_input: { command: 'private command' }
       })
-    ).toMatchObject({ state: 'needs_input', summary: 'Codex needs approval' })
+    ).toMatchObject({ state: 'needs_input', summary: 'ChatGPT needs approval' })
 
     expect(
       normalizeCodexEvent({
@@ -146,7 +208,7 @@ describe('provider event normalizers', () => {
         hook_event_name: 'PostToolUse',
         tool_response: { exitCode: 1, output: 'private output' }
       })
-    ).toMatchObject({ state: 'running', summary: 'Codex is working', unread: false })
+    ).toMatchObject({ state: 'running', summary: 'ChatGPT is working', unread: false })
 
     expect(
       normalizeCodexEvent({
@@ -154,7 +216,7 @@ describe('provider event normalizers', () => {
         cwd: '/tmp/project',
         hook_event_name: 'Stop'
       })
-    ).toMatchObject({ state: 'ready', summary: 'Codex finished', unread: true, live: false })
+    ).toMatchObject({ state: 'ready', summary: 'ChatGPT finished', unread: true, live: false })
   })
 
   it('maps Claude question, completion, API failure, and close events', () => {

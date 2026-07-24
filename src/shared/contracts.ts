@@ -1,4 +1,18 @@
-export type Provider = 'codex' | 'claude' | 'cursor'
+export const PROVIDERS = ['codex', 'claude', 'cursor', 'hermes', 'claudeclaw'] as const
+export type Provider = (typeof PROVIDERS)[number]
+
+export const PROVIDER_LABELS: Readonly<Record<Provider, string>> = {
+  codex: 'ChatGPT',
+  claude: 'Claude Code',
+  cursor: 'Cursor',
+  hermes: 'Hermes',
+  claudeclaw: 'ClaudeClaw'
+}
+
+export const PROVIDER_SHORT_LABELS: Readonly<Record<Provider, string>> = {
+  ...PROVIDER_LABELS,
+  claude: 'Claude'
+}
 
 export type PetState = 'running' | 'needs_input' | 'ready' | 'blocked'
 export type PetTheme = 'classic' | 'qmini'
@@ -48,6 +62,8 @@ export interface IntegrationStatus {
   codex: IntegrationDetail
   claude: IntegrationDetail
   cursor: IntegrationDetail
+  hermes: IntegrationDetail
+  claudeclaw: IntegrationDetail
   listenerActive: boolean
   /** Present when the loopback event listener failed to start or is down. */
   listenerMessage?: string
@@ -78,7 +94,12 @@ export interface AppSnapshot {
   appVersion: string
 }
 
-export type SessionAction = 'open_project' | 'attach' | 'resume' | 'copy_command'
+export type SessionAction =
+  | 'open_project'
+  | 'open_provider'
+  | 'attach'
+  | 'resume'
+  | 'copy_command'
 
 export interface SessionActionRequest {
   activityId: string

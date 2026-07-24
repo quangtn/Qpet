@@ -38,15 +38,19 @@ Theme paths and mood filenames are mapped in `src/renderer/src/pet-themes.ts`.
 | Tray header + Settings header | `assets/pet/glasses-pet-master-256.png` | 256×256 |
 | macOS `.app` / DMG icon | `assets/pet/glasses-pet-master.png` | ≥1024×1024 square (current: 1254×1254) |
 
-### Provider badge source art (currently unused)
+### Provider badges
 
-The current tray, Settings, and pet status chips render provider initials and CSS colors. Replacing these PNGs does not currently change the running UI.
+The tray and Settings render these PNGs directly.
 
 | Provider | File | Size |
 |----------|------|------|
-| Codex | `assets/providers/codex.png` | 256×256 |
+| ChatGPT (`codex` internally) | `assets/providers/codex.png` | 256×256 |
 | Claude | `assets/providers/claude.png` | 256×256 |
 | Cursor | `assets/providers/cursor.png` | 256×256 |
+| Hermes | `assets/providers/hermes.png` | 256×256 |
+| ClaudeClaw | `assets/providers/claudeclaw.png` | 256×256 |
+
+Hermes artwork is derived from the official Hermes desktop icon. ClaudeClaw artwork is cropped from the official bundled ClaudeClaw banner. Preserve their upstream attribution when replacing or redistributing those marks.
 
 ---
 
@@ -75,7 +79,7 @@ Hand back PNGs that match this checklist:
 - [ ] 5 pet moods at **256×256**, filenames exactly as in the table above
 - [ ] Branding mark at **256×256** → `glasses-pet-master-256.png`
 - [ ] App icon square **≥1024×1024** → `glasses-pet-master.png`
-- [ ] Optional: 3 provider badge source images at **256×256**
+- [ ] 5 provider badge images at **256×256**
 - [ ] Transparent background with clean antialiased edges; do not bake in black or checkerboard pixels
 - [ ] Character centered; leave a little padding so clipping / scaling looks clean
 - [ ] Same silhouette and palette family across all moods so state changes read as expression, not a different character
@@ -141,9 +145,11 @@ assets/
       awaiting-approval.png         ← unused
       notification.png              ← unused
   providers/
-    codex.png                       ← source art; currently unused
-    claude.png                      ← source art; currently unused
-    cursor.png                      ← source art; currently unused
+    codex.png                       ← used
+    claude.png                      ← used
+    cursor.png                      ← used
+    hermes.png                      ← used; official Hermes desktop source
+    claudeclaw.png                  ← used; official ClaudeClaw banner source
   pets/
     qmini/
       qmini-master-256.png          ← selectable theme branding

@@ -1,8 +1,19 @@
-import { access, mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
+import {
+  access,
+  chmod,
+  mkdtemp,
+  mkdir,
+  readFile,
+  readdir,
+  rm,
+  stat,
+  writeFile
+} from 'node:fs/promises'
 import { constants as fsConstants } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { parse } from 'jsonc-parser'
+import { isMap, isSeq, parseDocument } from 'yaml'
 
 import { afterEach, describe, expect, it } from 'vitest'
 
@@ -10,11 +21,11 @@ import {
   CLAUDE_HOOK_EVENTS,
   CODEX_HOOK_EVENTS,
   CURSOR_HOOK_EVENTS,
+  HERMES_HOOK_EVENTS,
   IntegrationManager,
   isQPetHookHandler
 } from '../src/main/integration-manager'
-import type { DiscoveredBinary } from '../src/main/binary-discovery'
-import type { Provider } from '../src/shared/contracts'
+import type { BinaryProvider, DiscoveredBinary } from '../src/main/binary-discovery'
 
 const temporaryDirectories: string[] = []
 
@@ -22,7 +33,7 @@ afterEach(async () => {
   await Promise.all(temporaryDirectories.splice(0).map((path) => rm(path, { recursive: true })))
 })
 
-function binary(provider: Provider): DiscoveredBinary {
+function binary(provider: BinaryProvider): DiscoveredBinary {
   return {
     provider,
     path: `/opt/qpet-test/${provider}`,
@@ -79,7 +90,7 @@ describe('IntegrationManager', () => {
     })
 
     const installed = await manager.install()
-    expect(installed.ok).toBe(true)
+    expect(installed.ok, installed.message).toBe(true)
     expect(installed.status.cursor.health).toBe('healthy')
     const source = await readFile(manager.cursorHooksPath, 'utf8')
     const config = JSON.parse(source)
@@ -360,7 +371,7 @@ describe('IntegrationManager', () => {
 
     const installed = await manager.install()
     expect(installed.ok).toBe(true)
-    expect(installed.message).toContain('Codex')
+    expect(installed.message).toContain('ChatGPT')
     expect(installed.message).not.toContain('Claude Code')
     expect(installed.status.codex.health).toBe('awaiting_trust')
     expect(qpetHandlerCount(JSON.parse(await readFile(manager.codexHooksPath, 'utf8')))).toBe(
@@ -384,6 +395,126 @@ describe('IntegrationManager', () => {
     const result = await manager.install()
     expect(result.ok).toBe(false)
     expect(result.message).toMatch(/No supported/)
+  })
+
+  it('preserves Hermes YAML and consent while installing hooks idempotently', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'qpet-hermes-home-'))
+    temporaryDirectories.push(home)
+    const hermesDir = join(home, '.hermes')
+    await mkdir(hermesDir, { recursive: true })
+    const configPath = join(hermesDir, 'config.yaml')
+    const allowlistPath = join(hermesDir, 'shell-hooks-allowlist.json')
+    await writeFile(configPath, `# Keep the model note.
+model:
+  default: local-test
+hooks:
+  post_tool_call:
+    # Keep this unrelated hook.
+    - command: /usr/local/bin/user-hook
+      timeout: 5
+`)
+    await chmod(configPath, 0o640)
+    const originalAllowlist = `${JSON.stringify({
+      approvals: [{ event: 'post_tool_call', command: '/usr/local/bin/user-hook' }]
+    }, null, 2)}\n`
+    await writeFile(allowlistPath, originalAllowlist)
+
+    const manager = new IntegrationManager({
+      homeDir: home,
+      appSupportDir: join(home, 'Library', 'Application Support', 'QPet'),
+      helperSourcePath: resolve('resources/qpet-hook.sh'),
+      isListenerActive: () => true,
+      discover: async () => ({ hermes: binary('hermes') }),
+      now: () => new Date('2026-07-10T12:34:56.789Z')
+    })
+
+    const installed = await manager.install()
+    expect(installed.ok, installed.message).toBe(true)
+    expect(installed.status.hermes.health).toBe('awaiting_trust')
+    const installedSource = await readFile(configPath, 'utf8')
+    expect(installedSource).toContain('# Keep the model note.')
+    expect(installedSource).toContain('# Keep this unrelated hook.')
+    expect(installedSource).toContain('/usr/local/bin/user-hook')
+    expect(installedSource.match(/QPET_HOOK_TAG=qpet-v1/g)).toHaveLength(
+      HERMES_HOOK_EVENTS.length
+    )
+    expect(installedSource.match(/command: \/usr\/bin\/env /g)).toHaveLength(
+      HERMES_HOOK_EVENTS.length
+    )
+    expect((await stat(configPath)).mode & 0o777).toBe(0o640)
+    expect(await readFile(allowlistPath, 'utf8')).toBe(originalAllowlist)
+    expect((await readdir(hermesDir)).filter((name) => name.includes('.qpet-backup-')))
+      .toHaveLength(1)
+
+    await manager.install()
+    expect(await readFile(configPath, 'utf8')).toBe(installedSource)
+    expect((await readdir(hermesDir)).filter((name) => name.includes('.qpet-backup-')))
+      .toHaveLength(1)
+
+    const document = parseDocument(installedSource)
+    const hooks = document.get('hooks', true)
+    expect(isMap(hooks)).toBe(true)
+    const approvals = HERMES_HOOK_EVENTS.map((event) => {
+      if (!isMap(hooks)) throw new Error('hooks missing')
+      const entries = hooks.get(event, true)
+      if (!isSeq(entries) || !isMap(entries.items[0])) throw new Error(`hook ${event} missing`)
+      return { event, command: entries.items[0].get('command') }
+    })
+    await writeFile(allowlistPath, `${JSON.stringify({ approvals }, null, 2)}\n`)
+    expect((await manager.getStatus()).hermes.health).toBe('healthy')
+
+    const removed = await manager.uninstall()
+    expect(removed.ok).toBe(true)
+    const removedSource = await readFile(configPath, 'utf8')
+    expect(removedSource).toContain('# Keep the model note.')
+    expect(removedSource).toContain('# Keep this unrelated hook.')
+    expect(removedSource).not.toContain('QPET_HOOK_TAG=qpet-v1')
+  })
+
+  it('refuses to overwrite invalid Hermes YAML', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'qpet-invalid-hermes-'))
+    temporaryDirectories.push(home)
+    await mkdir(join(home, '.hermes'), { recursive: true })
+    const configPath = join(home, '.hermes', 'config.yaml')
+    const invalid = 'hooks: [unterminated\n'
+    await writeFile(configPath, invalid)
+    const manager = new IntegrationManager({
+      homeDir: home,
+      appSupportDir: join(home, 'support'),
+      helperSourcePath: resolve('resources/qpet-hook.sh'),
+      isListenerActive: () => true,
+      discover: async () => ({ hermes: binary('hermes') })
+    })
+
+    const result = await manager.install()
+    expect(result.ok).toBe(false)
+    expect(result.message).toContain('invalid YAML')
+    expect(await readFile(configPath, 'utf8')).toBe(invalid)
+  })
+
+  it('reports ClaudeClaw through the shared Claude hook integration', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'qpet-claw-status-'))
+    temporaryDirectories.push(home)
+    const manager = new IntegrationManager({
+      homeDir: home,
+      appSupportDir: join(home, 'support'),
+      helperSourcePath: resolve('resources/qpet-hook.sh'),
+      isListenerActive: () => true,
+      discover: async () => ({ claude: binary('claude') }),
+      claudeClawWorkspaces: async () => [{
+        root: join(home, 'assistants', 'claw'),
+        running: true,
+        webUrl: 'http://127.0.0.1:4632'
+      }]
+    })
+
+    expect((await manager.getStatus()).claudeclaw.health).toBe('not_installed')
+    const result = await manager.install()
+    expect(result.ok).toBe(true)
+    expect(result.status.claudeclaw).toMatchObject({
+      installed: true,
+      health: 'healthy'
+    })
   })
 
   it('exposes a listener message when the event listener is down', async () => {

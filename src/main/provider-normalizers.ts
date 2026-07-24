@@ -41,7 +41,7 @@ export interface ProviderAdapter {
 
 /** A privacy-safe snapshot returned by `claude agents --json`. */
 export interface ClaudeAgentObservation {
-  provider: 'claude'
+  provider: 'claude' | 'claudeclaw'
   sessionId: string
   cwd: string
   projectName: string
@@ -134,15 +134,15 @@ export function normalizeCodexEvent(
   switch (eventName) {
     case 'sessionstart':
       // SessionStart can fire for a resumed but idle thread. Wait for a prompt
-      // before claiming that Codex is actively working.
+      // before claiming that ChatGPT is actively working.
       return null
     case 'userpromptsubmit':
-      return makeEvent(identity, 'running', 'Codex is working', now, false)
+      return makeEvent(identity, 'running', 'ChatGPT is working', now, false)
     case 'permissionrequest':
       return makeEvent(
         identity,
         'needs_input',
-        'Codex needs approval',
+        'ChatGPT needs approval',
         now,
         true,
         'permission'
@@ -150,10 +150,10 @@ export function normalizeCodexEvent(
     case 'posttooluse':
       // A completed tool means any preceding approval was resolved and the
       // turn is active again. Non-zero tool results are recoverable, not blockers.
-      return makeEvent(identity, 'running', 'Codex is working', now, false)
+      return makeEvent(identity, 'running', 'ChatGPT is working', now, false)
     case 'stop':
     case 'agentturncomplete':
-      return makeEvent(identity, 'ready', 'Codex finished', now, true, undefined, false)
+      return makeEvent(identity, 'ready', 'ChatGPT finished', now, true, undefined, false)
     default:
       // In particular, PostToolUse failures are not session failures.
       return null
@@ -268,6 +268,52 @@ export function normalizeClaudeEvent(
     default:
       // Tool failures are intentionally ignored. A StopFailure is the only
       // Claude hook failure that represents a failed turn.
+      return null
+  }
+}
+
+export function normalizeClaudeClawEvent(
+  payload: unknown,
+  now = Date.now()
+): NormalizedProviderEvent | null {
+  const event = normalizeClaudeEvent(payload, now)
+  if (!event) return null
+  return {
+    ...event,
+    id: activityId('claudeclaw', event.sessionId),
+    provider: 'claudeclaw',
+    summary: event.summary.replace(/^Claude\b/, 'ClaudeClaw'),
+    dedupeKey: event.dedupeKey?.replace(/^claude:/, 'claudeclaw:')
+  }
+}
+
+export function normalizeHermesEvent(
+  payload: unknown,
+  now = Date.now()
+): NormalizedProviderEvent | null {
+  const input = asRecord(payload)
+  if (!input || hermesPayloadMatch(input) === 0) return null
+  const identity = readIdentity('hermes', input)
+  if (!identity) return null
+
+  switch (eventName(input)) {
+    case 'prellmcall':
+      return makeEvent(identity, 'running', 'Hermes is working', now, false)
+    case 'preapprovalrequest':
+      return makeEvent(identity, 'needs_input', 'Hermes needs approval', now, true, 'permission')
+    case 'postapprovalresponse':
+      return makeEvent(identity, 'running', 'Hermes is working', now, false)
+    case 'onsessionend': {
+      const extra = asRecord(input.extra)
+      if (extra?.completed === true) {
+        return makeEvent(identity, 'ready', 'Hermes finished', now, true, undefined, false)
+      }
+      if (extra?.interrupted === true) {
+        return makeEvent(identity, 'ready', 'Hermes stopped', now, false, undefined, false)
+      }
+      return makeEvent(identity, 'blocked', 'Hermes could not finish', now, true, undefined, false)
+    }
+    default:
       return null
   }
 }
@@ -485,6 +531,12 @@ const CURSOR_EVENTS = new Set([
   'stop',
   'sessionend'
 ])
+const HERMES_EVENTS = new Set([
+  'prellmcall',
+  'preapprovalrequest',
+  'postapprovalresponse',
+  'onsessionend'
+])
 
 function eventName(input: Record<string, unknown>): string {
   return canonicalEventName(readString(input, [
@@ -541,6 +593,14 @@ function codexPayloadMatch(input: Record<string, unknown>): number {
     : 2
 }
 
+function hermesPayloadMatch(input: Record<string, unknown>): number {
+  if (!HERMES_EVENTS.has(eventName(input))) return 0
+  if (!readString(input, ['session_id', 'sessionId', 'session-id']) || !readWorkingDirectory(input)) {
+    return 0
+  }
+  return hasAnyKey(input, ['extra', 'tool_name', 'tool_input']) ? 3 : 2
+}
+
 export const providerAdapters: Readonly<Record<Provider, ProviderAdapter>> = {
   codex: {
     provider: 'codex',
@@ -572,6 +632,21 @@ export const providerAdapters: Readonly<Record<Provider, ProviderAdapter>> = {
     },
     normalize: normalizeClaudeEvent
   },
+  claudeclaw: {
+    provider: 'claudeclaw',
+    capabilities: {
+      inputRequests: true,
+      explicitCompletion: true,
+      authoritativePresence: true,
+      reconciliation: 'agents-json',
+      settleAfterMs: 5 * 60 * 1_000
+    },
+    match: (payload) => {
+      const input = asRecord(payload)
+      return input ? claudePayloadMatch(input) : 0
+    },
+    normalize: normalizeClaudeClawEvent
+  },
   cursor: {
     provider: 'cursor',
     capabilities: {
@@ -586,5 +661,20 @@ export const providerAdapters: Readonly<Record<Provider, ProviderAdapter>> = {
       return input ? cursorPayloadMatch(input) : 0
     },
     normalize: normalizeCursorEvent
+  },
+  hermes: {
+    provider: 'hermes',
+    capabilities: {
+      inputRequests: true,
+      explicitCompletion: true,
+      authoritativePresence: false,
+      reconciliation: 'hook-stale',
+      settleAfterMs: 24 * 60 * 60 * 1_000
+    },
+    match: (payload) => {
+      const input = asRecord(payload)
+      return input ? hermesPayloadMatch(input) : 0
+    },
+    normalize: normalizeHermesEvent
   }
 }

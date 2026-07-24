@@ -1,5 +1,11 @@
 import { useRef, useState, type PointerEvent } from 'react'
-import type { Activity, DictationStatus, PetTheme, Provider } from '@shared'
+import {
+  PROVIDERS,
+  PROVIDER_SHORT_LABELS,
+  type Activity,
+  type DictationStatus,
+  type PetTheme
+} from '@shared'
 import { getPetMood, stateDescriptions, stateLabels, type PetMood } from './model'
 import { petStateImage } from './pet-themes'
 
@@ -9,14 +15,6 @@ const moodGlyphs: Record<PetMood, string> = {
   needs_input: '!',
   ready: '✓',
   blocked: '×'
-}
-
-const providers: readonly Provider[] = ['codex', 'claude', 'cursor']
-
-const providerLabels: Record<Provider, string> = {
-  codex: 'Codex',
-  claude: 'Claude',
-  cursor: 'Cursor'
 }
 
 interface ProviderSummary {
@@ -86,7 +84,7 @@ export function Pet({ activities, loading, theme, dictation }: PetProps): React.
     (activity) =>
       activity.live && (activity.state === 'needs_input' || activity.state === 'blocked')
   ).length
-  const providerSummaries = providers.flatMap((provider) => {
+  const providerSummaries = PROVIDERS.flatMap((provider) => {
     const summary = summarizeProvider(activities.filter((activity) => activity.provider === provider))
     return summary ? [{ provider, ...summary }] : []
   })
@@ -209,14 +207,22 @@ export function Pet({ activities, loading, theme, dictation }: PetProps): React.
               data-testid={`provider-status-${provider}`}
               data-state={label}
               type="button"
-              aria-label={`Open ${providerLabels[provider]} Desktop`}
-              title={`Open ${providerLabels[provider]} Desktop`}
+              aria-label={
+                provider === 'claudeclaw'
+                  ? 'Open ClaudeClaw dashboard'
+                  : `Open ${PROVIDER_SHORT_LABELS[provider]} Desktop`
+              }
+              title={
+                provider === 'claudeclaw'
+                  ? 'Open ClaudeClaw dashboard'
+                  : `Open ${PROVIDER_SHORT_LABELS[provider]} Desktop`
+              }
               onClick={(event) => {
                 event.stopPropagation()
                 void window.qpet.openProviderApp(provider)
               }}
             >
-              <small>{providerLabels[provider]}</small>
+              <small>{PROVIDER_SHORT_LABELS[provider]}</small>
               <strong>{count} {providerStatusLabels[label]}</strong>
             </button>
           ))}

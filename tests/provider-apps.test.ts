@@ -60,4 +60,47 @@ describe('openProviderApp', () => {
       expect.any(Object)
     )
   })
+
+  it('uses the fixed Hermes application target', async () => {
+    const child = opener()
+    spawnMock.mockReturnValue(child)
+
+    const result = openProviderApp('hermes')
+    child.emit('close', 0)
+
+    await expect(result).resolves.toEqual({ ok: true, message: 'Hermes opened.' })
+    expect(spawnMock).toHaveBeenCalledWith(
+      '/usr/bin/open',
+      ['-a', 'Hermes'],
+      expect.any(Object)
+    )
+  })
+
+  it('opens only a validated loopback ClaudeClaw dashboard', async () => {
+    const openExternal = vi.fn(async () => undefined)
+    const openPath = vi.fn(async () => '')
+    await expect(openProviderApp('claudeclaw', {
+      preferredClaudeClaw: async () => ({
+        root: '/Users/test/claw',
+        running: true,
+        webUrl: 'http://127.0.0.1:4632'
+      }),
+      openExternal,
+      openPath
+    })).resolves.toEqual({ ok: true, message: 'ClaudeClaw dashboard opened.' })
+    expect(openExternal).toHaveBeenCalledWith('http://127.0.0.1:4632')
+    expect(spawnMock).not.toHaveBeenCalled()
+
+    await openProviderApp('claudeclaw', {
+      preferredClaudeClaw: async () => ({
+        root: '/Users/test/claw',
+        running: true,
+        webUrl: 'https://attacker.example/?token=secret'
+      }),
+      openExternal,
+      openPath
+    })
+    expect(openExternal).toHaveBeenCalledTimes(1)
+    expect(openPath).toHaveBeenCalledWith('/Users/test/claw')
+  })
 })
